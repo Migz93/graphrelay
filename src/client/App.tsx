@@ -117,9 +117,13 @@ function Settings() {
     }
   }
   const outcome = params.get("connection");
+  const reason = params.get("reason") ?? "";
+  const signInError = reason === "session"
+    ? "The Microsoft sign-in session expired or did not match. Start again from Connect Microsoft in this tab."
+    : "Microsoft sign-in failed." + (/^AADSTS[0-9]{4,10}$/.test(reason) ? " Microsoft error " + reason + "." : "") + " Try connecting again.";
   return <Page>
     <PageHeader title="Settings" />
-    {(error || outcome) && <ErrorBanner message={error || (outcome === "wrong-account" ? "Reconnect using the Microsoft account that owns your enrolled lists." : "Microsoft sign-in failed. Try connecting again.")} />}
+    {(error || outcome) && <ErrorBanner message={error || (outcome === "wrong-account" ? "Reconnect using the Microsoft account that owns your enrolled lists." : signInError)} />}
     <SectionCard title="Microsoft connection" description="Connect the Microsoft account that owns your shared shopping list.">
       {connection && <>
         <SettingRow label="Account" action>

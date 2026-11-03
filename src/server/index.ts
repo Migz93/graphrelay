@@ -266,8 +266,15 @@ app.post("/api/microsoft/connect", async (req, res) => {
 app.get("/api/microsoft/callback", async (req, res) => {
   const pending = req.session.oauth;
   delete req.session.oauth;
+  if (typeof req.query.error === "string" && pending && req.query.state === pending.state) {
+    const code = /^[a-z_]{1,50}$/.test(req.query.error) ? req.query.error : "unknown";
+    const detail = typeof req.query.error_description === "string" ? req.query.error_description.match(/AADSTS[0-9]{4,10}/)?.[0] : undefined;
+    console.warn("Microsoft authorization rejected", detail ?? code);
+    res.redirect("/settings?connection=failed&reason=" + (detail ?? code));
+    return;
+  }
   if (!pending || Date.now() - pending.issued > 600_000 || req.query.state !== pending.state || typeof req.query.code !== "string") {
-    res.redirect("/settings?connection=failed");
+    res.redirect("/settings?connection=failed&reason=session");
     return;
   }
   try {
@@ -281,8 +288,11 @@ app.get("/api/microsoft/callback", async (req, res) => {
     write("account", result.account.homeAccountId);
     write("username", result.account.username || "Microsoft account");
     res.redirect("/settings");
-  } catch {
-    res.redirect("/settings?connection=failed");
+  } catch (error) {
+    const detail = error instanceof Error ? error.message.match(/AADSTS[0-9]{4,10}/)?.[0] : undefined;
+    const reason = detail ?? "token-exchange";
+    console.warn("Microsoft token exchange failed", reason);
+    res.redirect("/settings?connection=failed&reason=" + reason);
   }
 });
 app.get("/api/lists", async (_req, res) => {
