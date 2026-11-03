@@ -18,7 +18,7 @@ async function api<T>(path: string, method = "GET", body?: object): Promise<T> {
 }
 
 type Session = { configured: boolean; signedIn: boolean; redirectUri: string };
-type Connection = { account: string | null; redirectUri: string };
+type Connection = { account: string | null; redirectUri: string; canUpdateSecret: boolean };
 type List = {
   id: string; displayName: string; isShared: boolean; isOwner: boolean;
   enrolled: boolean; mode: string; order: string[]; lastRun?: string; error?: string;
@@ -101,6 +101,24 @@ function Settings() {
   const [connection, setConnection] = useState<Connection>();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [secret, setSecret] = useState("");
+  const [savedSecret, setSavedSecret] = useState(false);
+  const [savingSecret, setSavingSecret] = useState(false);
+  async function saveSecret(event: FormEvent) {
+    event.preventDefault();
+    setError("");
+    setSavedSecret(false);
+    setSavingSecret(true);
+    try {
+      await api("/microsoft/secret", "PUT", { clientSecret: secret });
+      setSecret("");
+      setSavedSecret(true);
+    } catch (error) {
+      setError((error as Error).message);
+    } finally {
+      setSavingSecret(false);
+    }
+  }
   const [params] = useSearchParams();
   useEffect(() => {
     void api<Connection>("/microsoft").then(setConnection).catch(error => setError(error.message));
@@ -123,7 +141,7 @@ function Settings() {
     : "Microsoft sign-in failed." + (/^AADSTS[0-9]{4,10}$/.test(reason) ? " Microsoft error " + reason + "." : "") + " Try connecting again.";
   return <Page>
     <PageHeader title="Settings" />
-    {(error || outcome) && <ErrorBanner message={error || (outcome === "wrong-account" ? "Reconnect using the Microsoft account that owns your enrolled lists." : signInError)} />}
+    {(error || (outcome && !savedSecret)) && <ErrorBanner message={error || (outcome === "wrong-account" ? "Reconnect using the Microsoft account that owns your enrolled lists." : signInError)} />}
     <SectionCard title="Microsoft connection" description="Connect the Microsoft account that owns your shared shopping list.">
       {connection && <>
         <SettingRow label="Account" action>
@@ -133,6 +151,16 @@ function Settings() {
         </SettingRow>
         {connection.account && <p>Connected as {connection.account}</p>}
         <p className="break-all text-sm text-on-surface-variant">Redirect URI · {connection.redirectUri}</p>
+        {connection.canUpdateSecret && <details>
+          <summary className="cursor-pointer text-sm">Replace client secret</summary>
+          <form onSubmit={saveSecret} className="mt-3 grid gap-3">
+            <label className="grid gap-2 text-sm">New client secret value
+              <TextInput type="password" value={secret} onChange={setSecret} autoComplete="off" required />
+            </label>
+            <div><button className={secondaryButtonClass} disabled={savingSecret}>Save client secret</button></div>
+            {savedSecret && <p role="status" className="text-sm text-success">Client secret saved. Select Connect Microsoft to try again.</p>}
+          </form>
+        </details>}
       </>}
     </SectionCard>
   </Page>;

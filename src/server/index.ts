@@ -255,7 +255,23 @@ app.post("/api/logout", (req, res, next) => {
     res.sendStatus(204);
   });
 });
-app.get("/api/microsoft", (_req, res) => { res.json({ account: read("username") ?? null, redirectUri }); });
+app.get("/api/microsoft", (_req, res) => { res.json({ account: read("username") ?? null, redirectUri, canUpdateSecret: !!setup }); });
+app.put("/api/microsoft/secret", (req, res) => {
+  if (req.get("Origin") !== origin) { res.sendStatus(403); return; }
+  if (!setup) { res.sendStatus(409); return; }
+  const clientSecret = typeof req.body?.clientSecret === "string" ? req.body.clientSecret.trim() : "";
+  if (!clientSecret || clientSecret.length > 1024) {
+    res.status(400).json({ error: "Enter the client secret value from Microsoft Entra." });
+    return;
+  }
+  const configuration = { ...setup, clientSecret };
+  const client = microsoftClient(configuration.clientId, clientSecret);
+  write("setup", encrypt(JSON.stringify(configuration)));
+  setup = configuration;
+  msal = client;
+  delete req.session.oauth;
+  res.sendStatus(204);
+});
 app.post("/api/microsoft/connect", async (req, res) => {
   const state = randomBytes(32).toString("hex");
   const pkce = await new CryptoProvider().generatePkceCodes();
