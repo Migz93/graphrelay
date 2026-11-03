@@ -6,7 +6,9 @@ A self-hosted Microsoft account companion. The first prototype organizes shared 
 
 Create a Microsoft Entra app registration that supports personal Microsoft accounts. Add a **Web** redirect URI of `<PUBLIC_URL>/api/microsoft/callback`, add delegated Microsoft Graph **Tasks.ReadWrite**, and create a client secret. Use an HTTPS origin for remote access, or `http://localhost:9304` for a loopback test. Set TRUST_PROXY=1 only when serving through one trusted reverse proxy.
 
-Use .env.example as a reference. Set an administrator password and a long random APP_SECRET. Keep APP_SECRET stable across restarts because it encrypts the persisted Microsoft token cache. Ensure the persistent /config mount is writable by UID 1000. Sign in to GraphRelay as administrator, then connect Microsoft in Settings using the shared list owner's account.
+Keep the instance private until first-run setup is complete. Open GraphRelay, enter the Application (client) ID and client secret value, and choose an administrator password. Sign in and connect Microsoft in Settings using the shared list owner's account.
+
+GraphRelay encrypts the Microsoft configuration and token cache with a key stored under /config and stores a salted hash of the administrator password. Preserve the whole /config volume across restarts and keep it private. The volume must be writable by UID 1000. Existing environment-configured instances can still use their original settings.
 
 ## Test the prototype
 

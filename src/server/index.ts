@@ -2,8 +2,8 @@ import express from "express";
 import session from "express-session";
 import Database from "better-sqlite3";
 import { ConfidentialClientApplication, CryptoProvider } from "@azure/msal-node";
-import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { aisles, planTitles, type Mode } from "./ordering.js";
 
@@ -19,10 +19,21 @@ app.disable("x-powered-by");
 const env = process.env;
 const origin = new URL(env.PUBLIC_URL ?? "http://localhost:9304").origin;
 const redirectUri = origin + "/api/microsoft/callback";
-const key = env.APP_SECRET ? createHash("sha256").update(env.APP_SECRET).digest() : undefined;
-const configured = Boolean(key && env.ADMIN_PASSWORD && env.MICROSOFT_CLIENT_ID && env.MICROSOFT_CLIENT_SECRET);
 const dataDir = env.DATA_DIR ?? "/config";
-mkdirSync(dataDir, { recursive: true });
+mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+const keyFile = resolve(dataDir, "setup.key");
+function loadKey() {
+  if (env.APP_SECRET) return createHash("sha256").update(env.APP_SECRET).digest();
+  try {
+    return readFileSync(keyFile);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    const generated = randomBytes(32);
+    writeFileSync(keyFile, generated, { mode: 0o600, flag: "wx" });
+    return generated;
+  }
+}
+const key = loadKey();
 const db = new Database(resolve(dataDir, "graphrelay.db"));
 db.pragma("journal_mode = WAL");
 db.exec(`
@@ -40,32 +51,41 @@ function write(key: string, value: string) {
 }
 function encrypt(value: string) {
   const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", key!, iv);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
   const encrypted = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
   return Buffer.concat([iv, cipher.getAuthTag(), encrypted]).toString("base64");
 }
 function decrypt(value: string) {
   const raw = Buffer.from(value, "base64");
-  const decipher = createDecipheriv("aes-256-gcm", key!, raw.subarray(0, 12));
+  const decipher = createDecipheriv("aes-256-gcm", key, raw.subarray(0, 12));
   decipher.setAuthTag(raw.subarray(12, 28));
   return Buffer.concat([decipher.update(raw.subarray(28)), decipher.final()]).toString("utf8");
 }
-const msal = configured ? new ConfidentialClientApplication({
-  auth: {
-    clientId: env.MICROSOFT_CLIENT_ID!,
-    clientSecret: env.MICROSOFT_CLIENT_SECRET!,
-    authority: "https://login.microsoftonline.com/common",
-  },
-  cache: { cachePlugin: {
-    async beforeCacheAccess(context) {
-      const cache = read("cache");
-      if (cache) context.tokenCache.deserialize(decrypt(cache));
+function microsoftClient(clientId: string, clientSecret: string) {
+  return new ConfidentialClientApplication({
+    auth: {
+      clientId,
+      clientSecret,
+      authority: "https://login.microsoftonline.com/common",
     },
-    async afterCacheAccess(context) {
-      if (context.cacheHasChanged) write("cache", encrypt(context.tokenCache.serialize()));
-    },
-  } },
-}) : undefined;
+    cache: { cachePlugin: {
+      async beforeCacheAccess(context) {
+        const cache = read("cache");
+        if (cache) context.tokenCache.deserialize(decrypt(cache));
+      },
+      async afterCacheAccess(context) {
+        if (context.cacheHasChanged) write("cache", encrypt(context.tokenCache.serialize()));
+      },
+    } },
+  });
+}
+type Setup = { clientId: string; clientSecret: string; salt: string; passwordHash: string };
+const savedSetup = read("setup");
+let setup = savedSetup ? JSON.parse(decrypt(savedSetup)) as Setup : undefined;
+const legacySetup = Boolean(env.APP_SECRET && env.ADMIN_PASSWORD && env.MICROSOFT_CLIENT_ID && env.MICROSOFT_CLIENT_SECRET);
+let msal = setup
+  ? microsoftClient(setup.clientId, setup.clientSecret)
+  : legacySetup ? microsoftClient(env.MICROSOFT_CLIENT_ID!, env.MICROSOFT_CLIENT_SECRET!) : undefined;
 const scopes = ["openid", "profile", "offline_access", "Tasks.ReadWrite"];
 
 let tokenRequest: Promise<string> | undefined;
@@ -156,7 +176,7 @@ async function run(list: Enrolled) {
 }
 let sweeping = false;
 setInterval(async () => {
-  if (!configured || !read("account") || sweeping) return;
+  if (!msal || !read("account") || sweeping) return;
   sweeping = true;
   try {
     for (const list of db.prepare("SELECT * FROM lists").all() as Enrolled[]) {
@@ -170,14 +190,14 @@ setInterval(async () => {
 if (env.TRUST_PROXY === "1") app.set("trust proxy", 1);
 app.use(express.json({ limit: "16kb" }));
 app.use(session({
-  secret: env.APP_SECRET ?? randomBytes(32).toString("hex"),
+  secret: createHash("sha256").update(key).update("session").digest("hex"),
   resave: false,
   saveUninitialized: false,
   cookie: { httpOnly: true, sameSite: "lax", secure: origin.startsWith("https:") },
 }));
 app.get("/api/health", (_req, res) => { res.json({ ok: true }); });
 app.use("/api", (_req, res, next) => { res.set("Cache-Control", "no-store"); next(); });
-app.get("/api/session", (req, res) => { res.json({ configured, signedIn: !!req.session.admin }); });
+app.get("/api/session", (req, res) => { res.json({ configured: !!msal, signedIn: !!req.session.admin, redirectUri }); });
 app.use("/api", (req, res, next) => {
   if (req.method !== "GET" && req.get("X-GraphRelay") !== "1") {
     res.sendStatus(403);
@@ -185,14 +205,36 @@ app.use("/api", (req, res, next) => {
   }
   next();
 });
+app.post("/api/setup", (req, res) => {
+  if (msal) { res.sendStatus(409); return; }
+  if (req.get("Origin") !== origin) { res.sendStatus(403); return; }
+  const { clientId, clientSecret, password } = req.body ?? {};
+  if (typeof clientId !== "string" || !/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(clientId)
+    || typeof clientSecret !== "string" || !clientSecret.trim() || clientSecret.length > 1024
+    || typeof password !== "string" || password.length < 12 || password.length > 256) {
+    res.status(400).json({ error: "Enter a valid client ID, client secret and a password of 12–256 characters." });
+    return;
+  }
+  const salt = randomBytes(16).toString("hex");
+  const configuration = { clientId, clientSecret, salt, passwordHash: scryptSync(password, salt, 32).toString("hex") };
+  const client = microsoftClient(clientId, clientSecret);
+  write("setup", encrypt(JSON.stringify(configuration)));
+  setup = configuration;
+  msal = client;
+  res.sendStatus(204);
+});
 let failures = 0;
 let resetAt = 0;
 app.post("/api/login", (req, res, next) => {
-  if (!configured) { res.sendStatus(503); return; }
+  if (!msal) { res.sendStatus(503); return; }
   if (Date.now() > resetAt) { failures = 0; resetAt = Date.now() + 60_000; }
   if (failures >= 10) { res.sendStatus(429); return; }
+  const password = req.body?.password;
   const digest = (value: string) => createHash("sha256").update(value).digest();
-  if (typeof req.body.password !== "string" || !timingSafeEqual(digest(req.body.password), digest(env.ADMIN_PASSWORD!))) {
+  const valid = typeof password === "string" && password.length <= 1024 && (setup
+    ? timingSafeEqual(scryptSync(password, setup.salt, 32), Buffer.from(setup.passwordHash, "hex"))
+    : timingSafeEqual(digest(password), digest(env.ADMIN_PASSWORD!)));
+  if (!valid) {
     failures++;
     res.sendStatus(401);
     return;

@@ -17,13 +17,54 @@ async function api<T>(path: string, method = "GET", body?: object): Promise<T> {
   return response.status === 204 ? undefined as T : await response.json() as T;
 }
 
-type Session = { configured: boolean; signedIn: boolean };
+type Session = { configured: boolean; signedIn: boolean; redirectUri: string };
 type Connection = { account: string | null; redirectUri: string };
 type List = {
   id: string; displayName: string; isShared: boolean; isOwner: boolean;
   enrolled: boolean; mode: string; order: string[]; lastRun?: string; error?: string;
 };
 type Activity = { created: string; message: string };
+
+function Setup({ redirectUri, onSetup }: { redirectUri: string; onSetup: () => void }) {
+  const [clientId, setClientId] = useState("");
+  const [clientSecret, setClientSecret] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      await api("/setup", "POST", { clientId: clientId.trim(), clientSecret: clientSecret.trim(), password });
+      onSetup();
+    } catch (error) {
+      setError((error as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return <main className="mx-auto mt-12 max-w-xl p-6">
+    <PageHeader title="Set up GraphRelay" />
+    <SectionCard title="Microsoft app registration" description="Add the following Web redirect URI to your Microsoft Entra app registration and grant delegated Tasks.ReadWrite access.">
+      <code className="break-all text-sm">{redirectUri}</code>
+      {error && <ErrorBanner message={error} />}
+      <form onSubmit={submit} className="grid gap-4">
+        <label className="grid gap-2">Application (client) ID
+          <TextInput value={clientId} onChange={setClientId} autoComplete="off" required />
+        </label>
+        <label className="grid gap-2">Client secret value
+          <TextInput type="password" value={clientSecret} onChange={setClientSecret} autoComplete="off" required />
+        </label>
+        <label className="grid gap-2">GraphRelay admin password
+          <TextInput type="password" value={password} onChange={setPassword} autoComplete="new-password" minLength={12} maxLength={256} required />
+          <span className="text-sm text-on-surface-variant">Choose at least 12 characters.</span>
+        </label>
+        <button className={primaryButtonClass} disabled={busy}>Finish setup</button>
+      </form>
+    </SectionCard>
+  </main>;
+}
 
 function Login({ onLogin }: { onLogin: () => void }) {
   const [password, setPassword] = useState("");
@@ -195,7 +236,7 @@ export default function App() {
   useEffect(refresh, []);
   if (error) return <Page><ErrorBanner message={error} /></Page>;
   if (!session) return <PageLoading label="Loading GraphRelay…" />;
-  if (!session.configured) return <Page><PageHeader title="GraphRelay" /><SectionCard title="Setup required" description="Configure the administrator password, app secret, and Microsoft app credentials to enable sign-in." /></Page>;
+  if (!session.configured) return <Setup redirectUri={session.redirectUri} onSetup={refresh} />;
   if (!session.signedIn) return <Login onLogin={refresh} />;
   return <Layout user={{ username: "Administrator", displayName: "Administrator" }} onLogout={() => void api("/logout", "POST").then(refresh).catch(error => setError(error.message))}>
     <Routes>
