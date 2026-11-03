@@ -17,17 +17,15 @@ async function api<T>(path: string, method = "GET", body?: object): Promise<T> {
   return response.status === 204 ? undefined as T : await response.json() as T;
 }
 
-type Session = { configured: boolean; signedIn: boolean; redirectUri: string };
-type Connection = { account: string | null; redirectUri: string; canUpdateSecret: boolean };
+type Session = { configured: boolean; signedIn: boolean };
+type Connection = { account: string | null; redirectUri: string; clientId: string | null; editable: boolean };
 type List = {
   id: string; displayName: string; isShared: boolean; isOwner: boolean;
   enrolled: boolean; mode: string; order: string[]; lastRun?: string; error?: string;
 };
 type Activity = { created: string; message: string };
 
-function Setup({ redirectUri, onSetup }: { redirectUri: string; onSetup: () => void }) {
-  const [clientId, setClientId] = useState("");
-  const [clientSecret, setClientSecret] = useState("");
+function Login({ onLogin, firstRun = false }: { onLogin: () => void; firstRun?: boolean }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -36,45 +34,7 @@ function Setup({ redirectUri, onSetup }: { redirectUri: string; onSetup: () => v
     setBusy(true);
     setError("");
     try {
-      await api("/setup", "POST", { clientId: clientId.trim(), clientSecret: clientSecret.trim(), password });
-      onSetup();
-    } catch (error) {
-      setError((error as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-  return <main className="mx-auto mt-12 max-w-xl p-6">
-    <PageHeader title="Set up GraphRelay" />
-    <SectionCard title="Microsoft app registration" description="Add the following Web redirect URI to your Microsoft Entra app registration and grant delegated Tasks.ReadWrite access.">
-      <code className="break-all text-sm">{redirectUri}</code>
-      {error && <ErrorBanner message={error} />}
-      <form onSubmit={submit} className="grid gap-4">
-        <label className="grid gap-2">Application (client) ID
-          <TextInput value={clientId} onChange={setClientId} autoComplete="off" required />
-        </label>
-        <label className="grid gap-2">Client secret value
-          <TextInput type="password" value={clientSecret} onChange={setClientSecret} autoComplete="off" required />
-        </label>
-        <label className="grid gap-2">GraphRelay admin password
-          <TextInput type="password" value={password} onChange={setPassword} autoComplete="new-password" minLength={12} maxLength={256} required />
-          <span className="text-sm text-on-surface-variant">Choose at least 12 characters.</span>
-        </label>
-        <button className={primaryButtonClass} disabled={busy}>Finish setup</button>
-      </form>
-    </SectionCard>
-  </main>;
-}
-
-function Login({ onLogin }: { onLogin: () => void }) {
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    setBusy(true);
-    setError("");
-    try {
+      if (firstRun) await api("/setup", "POST", { password });
       await api("/login", "POST", { password });
       onLogin();
     } catch (error) {
@@ -85,13 +45,13 @@ function Login({ onLogin }: { onLogin: () => void }) {
   }
   return <main className="mx-auto mt-24 max-w-md p-6">
     <PageHeader title="GraphRelay" />
-    <SectionCard title="Sign in" description="Use the administrator password for this instance.">
+    <SectionCard title={firstRun ? "Set up GraphRelay" : "Sign in"} description={firstRun ? "Choose a password for the GraphRelay web interface." : "Use the administrator password for this instance."}>
       {error && <ErrorBanner message={error} />}
       <form onSubmit={submit} className="grid gap-4">
         <label className="grid gap-2">Password
-          <TextInput type="password" autoComplete="current-password" value={password} onChange={setPassword} required />
+          <TextInput type="password" autoComplete={firstRun ? "new-password" : "current-password"} value={password} onChange={setPassword} required />
         </label>
-        <button className={primaryButtonClass} disabled={busy}>Sign in</button>
+        <button className={primaryButtonClass} disabled={busy}>{firstRun ? "Create admin password" : "Sign in"}</button>
       </form>
     </SectionCard>
   </main>;
@@ -101,6 +61,7 @@ function Settings() {
   const [connection, setConnection] = useState<Connection>();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [clientId, setClientId] = useState("");
   const [secret, setSecret] = useState("");
   const [savedSecret, setSavedSecret] = useState(false);
   const [savingSecret, setSavingSecret] = useState(false);
@@ -110,7 +71,8 @@ function Settings() {
     setSavedSecret(false);
     setSavingSecret(true);
     try {
-      await api("/microsoft/secret", "PUT", { clientSecret: secret });
+      await api("/microsoft", "PUT", { clientId, clientSecret: secret });
+      setConnection(await api<Connection>("/microsoft"));
       setSecret("");
       setSavedSecret(true);
     } catch (error) {
@@ -121,7 +83,7 @@ function Settings() {
   }
   const [params] = useSearchParams();
   useEffect(() => {
-    void api<Connection>("/microsoft").then(setConnection).catch(error => setError(error.message));
+    void api<Connection>("/microsoft").then(value => { setConnection(value); setClientId(value.clientId ?? ""); }).catch(error => setError(error.message));
   }, []);
   async function connect() {
     setBusy(true);
@@ -145,20 +107,23 @@ function Settings() {
     <SectionCard title="Microsoft connection" description="Connect the Microsoft account that owns your shared shopping list.">
       {connection && <>
         <SettingRow label="Account" action>
-          <button className={primaryButtonClass} onClick={() => void connect()} disabled={busy}>
+          <button className={primaryButtonClass} onClick={() => void connect()} disabled={busy || !connection.clientId}>
             {connection.account ? "Reconnect Microsoft" : "Connect Microsoft"}
           </button>
         </SettingRow>
         {connection.account && <p>Connected as {connection.account}</p>}
         <p className="break-all text-sm text-on-surface-variant">Redirect URI · {connection.redirectUri}</p>
-        {connection.canUpdateSecret && <details>
-          <summary className="cursor-pointer text-sm">Replace client secret</summary>
+        {connection.editable && <details open={!connection.clientId || outcome === "failed"}>
+          <summary className="cursor-pointer text-sm">Microsoft app credentials</summary>
           <form onSubmit={saveSecret} className="mt-3 grid gap-3">
-            <label className="grid gap-2 text-sm">New client secret value
+            <label className="grid gap-2 text-sm">Application (client) ID
+              <TextInput value={clientId} onChange={setClientId} autoComplete="off" required />
+            </label>
+            <label className="grid gap-2 text-sm">Client secret value
               <TextInput type="password" value={secret} onChange={setSecret} autoComplete="off" required />
             </label>
-            <div><button className={secondaryButtonClass} disabled={savingSecret}>Save client secret</button></div>
-            {savedSecret && <p role="status" className="text-sm text-success">Client secret saved. Select Connect Microsoft to try again.</p>}
+            <div><button className={secondaryButtonClass} disabled={savingSecret}>Save Microsoft credentials</button></div>
+            {savedSecret && <p role="status" className="text-sm text-success">Microsoft credentials saved. Select Connect Microsoft to try again.</p>}
           </form>
         </details>}
       </>}
@@ -268,7 +233,7 @@ export default function App() {
   useEffect(refresh, []);
   if (error) return <Page><ErrorBanner message={error} /></Page>;
   if (!session) return <PageLoading label="Loading GraphRelay…" />;
-  if (!session.configured) return <Setup redirectUri={session.redirectUri} onSetup={refresh} />;
+  if (!session.configured) return <Login firstRun onLogin={refresh} />;
   if (!session.signedIn) return <Login onLogin={refresh} />;
   return <Layout user={{ username: "Administrator", displayName: "Administrator" }} onLogout={() => void api("/logout", "POST").then(refresh).catch(error => setError(error.message))}>
     <Routes>

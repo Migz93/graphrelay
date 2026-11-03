@@ -79,11 +79,12 @@ function microsoftClient(clientId: string, clientSecret: string) {
     } },
   });
 }
-type Setup = { clientId: string; clientSecret: string; salt: string; passwordHash: string };
+type Setup = { clientId?: string; clientSecret?: string; salt: string; passwordHash: string };
 const savedSetup = read("setup");
 let setup = savedSetup ? JSON.parse(decrypt(savedSetup)) as Setup : undefined;
 const legacySetup = Boolean(env.APP_SECRET && env.ADMIN_PASSWORD && env.MICROSOFT_CLIENT_ID && env.MICROSOFT_CLIENT_SECRET);
-let msal = setup
+const adminConfigured = () => !!setup || legacySetup;
+let msal = setup?.clientId && setup.clientSecret
   ? microsoftClient(setup.clientId, setup.clientSecret)
   : legacySetup ? microsoftClient(env.MICROSOFT_CLIENT_ID!, env.MICROSOFT_CLIENT_SECRET!) : undefined;
 const scopes = ["openid", "profile", "offline_access", "Tasks.ReadWrite"];
@@ -92,7 +93,7 @@ let tokenRequest: Promise<string> | undefined;
 async function accessToken() {
   if (!msal) throw new Error("Microsoft connection is unavailable.");
   const account = await msal.getTokenCache().getAccountByHomeId(read("account") ?? "");
-  if (!account) throw new Error("Connect Microsoft in Settings.");
+  if (!account || !read("username")) throw new Error("Connect Microsoft in Settings.");
   return (await msal.acquireTokenSilent({ account, scopes })).accessToken;
 }
 async function graph<T>(path: string, body?: object): Promise<T> {
@@ -197,7 +198,7 @@ app.use(session({
 }));
 app.get("/api/health", (_req, res) => { res.json({ ok: true }); });
 app.use("/api", (_req, res, next) => { res.set("Cache-Control", "no-store"); next(); });
-app.get("/api/session", (req, res) => { res.json({ configured: !!msal, signedIn: !!req.session.admin, redirectUri }); });
+app.get("/api/session", (req, res) => { res.json({ configured: adminConfigured(), signedIn: !!req.session.admin }); });
 app.use("/api", (req, res, next) => {
   if (req.method !== "GET" && req.get("X-GraphRelay") !== "1") {
     res.sendStatus(403);
@@ -206,27 +207,23 @@ app.use("/api", (req, res, next) => {
   next();
 });
 app.post("/api/setup", (req, res) => {
-  if (msal) { res.sendStatus(409); return; }
+  if (adminConfigured()) { res.sendStatus(409); return; }
   if (req.get("Origin") !== origin) { res.sendStatus(403); return; }
-  const { clientId, clientSecret, password } = req.body ?? {};
-  if (typeof clientId !== "string" || !/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(clientId)
-    || typeof clientSecret !== "string" || !clientSecret.trim() || clientSecret.length > 1024
-    || typeof password !== "string" || password.length < 12 || password.length > 256) {
-    res.status(400).json({ error: "Enter a valid client ID, client secret and a password of 12–256 characters." });
+  const { password } = req.body ?? {};
+  if (typeof password !== "string" || !password.trim() || password.length > 256) {
+    res.status(400).json({ error: "Enter an admin password of up to 256 characters." });
     return;
   }
   const salt = randomBytes(16).toString("hex");
-  const configuration = { clientId, clientSecret, salt, passwordHash: scryptSync(password, salt, 32).toString("hex") };
-  const client = microsoftClient(clientId, clientSecret);
+  const configuration = { salt, passwordHash: scryptSync(password, salt, 32).toString("hex") };
   write("setup", encrypt(JSON.stringify(configuration)));
   setup = configuration;
-  msal = client;
   res.sendStatus(204);
 });
 let failures = 0;
 let resetAt = 0;
 app.post("/api/login", (req, res, next) => {
-  if (!msal) { res.sendStatus(503); return; }
+  if (!adminConfigured()) { res.sendStatus(503); return; }
   if (Date.now() > resetAt) { failures = 0; resetAt = Date.now() + 60_000; }
   if (failures >= 10) { res.sendStatus(429); return; }
   const password = req.body?.password;
@@ -255,24 +252,31 @@ app.post("/api/logout", (req, res, next) => {
     res.sendStatus(204);
   });
 });
-app.get("/api/microsoft", (_req, res) => { res.json({ account: read("username") ?? null, redirectUri, canUpdateSecret: !!setup }); });
-app.put("/api/microsoft/secret", (req, res) => {
+app.get("/api/microsoft", (_req, res) => { res.json({ account: read("username") ?? null, redirectUri, clientId: setup?.clientId ?? (legacySetup ? env.MICROSOFT_CLIENT_ID : null), editable: !!setup }); });
+app.put("/api/microsoft", (req, res) => {
   if (req.get("Origin") !== origin) { res.sendStatus(403); return; }
   if (!setup) { res.sendStatus(409); return; }
+  const clientId = typeof req.body?.clientId === "string" ? req.body.clientId.trim().toLowerCase() : "";
   const clientSecret = typeof req.body?.clientSecret === "string" ? req.body.clientSecret.trim() : "";
-  if (!clientSecret || clientSecret.length > 1024) {
-    res.status(400).json({ error: "Enter the client secret value from Microsoft Entra." });
+  if (!/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/.test(clientId) || !clientSecret || clientSecret.length > 1024) {
+    res.status(400).json({ error: "Enter the Application (client) ID and client secret value from Microsoft Entra." });
     return;
   }
-  const configuration = { ...setup, clientSecret };
-  const client = microsoftClient(configuration.clientId, clientSecret);
-  write("setup", encrypt(JSON.stringify(configuration)));
+  const configuration = { ...setup, clientId, clientSecret };
+  const client = microsoftClient(clientId, clientSecret);
+  db.transaction(() => {
+    write("setup", encrypt(JSON.stringify(configuration)));
+    if (setup?.clientId?.toLowerCase() !== clientId) {
+      db.prepare("DELETE FROM state WHERE key IN ('cache', 'username')").run();
+    }
+  })();
   setup = configuration;
   msal = client;
   delete req.session.oauth;
   res.sendStatus(204);
 });
 app.post("/api/microsoft/connect", async (req, res) => {
+  if (!msal) { res.status(409).json({ error: "Save your Microsoft app credentials first." }); return; }
   const state = randomBytes(32).toString("hex");
   const pkce = await new CryptoProvider().generatePkceCodes();
   req.session.oauth = { state, verifier: pkce.verifier, issued: Date.now() };
