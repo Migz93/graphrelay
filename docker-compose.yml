@@ -1,0 +1,9 @@
+services:
+  graphrelay:
+    image: ghcr.io/migz93/graphrelay:develop
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9304:9304"
+    volumes:
+      - /opt/graphrelay:/config
+    env_file: .env

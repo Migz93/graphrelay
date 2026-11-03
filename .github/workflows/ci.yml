@@ -1,0 +1,31 @@
+name: CI
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop, main]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check && npm test && npm run build
+      - run: docker build --build-arg COMMIT_SHA="$GITHUB_SHA" -t graphrelay:ci .
+      - run: |
+          trap 'docker rm -f graphrelay-ci >/dev/null 2>&1 || true' EXIT
+          docker run -d --name graphrelay-ci --tmpfs /config:uid=1000,gid=1000 graphrelay:ci
+          for i in $(seq 1 30); do
+            if docker exec graphrelay-ci node -e 'fetch("http://127.0.0.1:9304/api/health").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))'; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs graphrelay-ci
+          exit 1
