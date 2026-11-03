@@ -14,3 +14,10 @@ test("number-only titles follow aisle order and respect a user edit", () => {
   const originals = { "1": { base: "Milk", applied: "04 Dairy · Milk" } };
   deepEqual(planTitles(tasks, "number", aisles, originals).map(task => task.next), ["001 · Apples", "002 · Peas", "003 · Cheese"]);
 });
+
+test("editing an item in To Do preserves the edit without stacking prefixes", () => {
+  const tasks = [{ id: "1", title: "03 Frozen · Pizza" }];
+  const originals = { "1": { base: "Peas", applied: "03 Frozen · Peas" } };
+  deepEqual(planTitles(tasks, "named", aisles, originals).map(task => task.next), ["03 Frozen · Pizza"]);
+  deepEqual(planTitles(tasks, "off", aisles, originals).map(task => task.next), ["Pizza"]);
+});

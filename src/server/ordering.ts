@@ -12,7 +12,8 @@ const groceries: Record<string, string> = {
 export function planTitles(tasks: { id: string; title: string }[], mode: Mode, order: string[], originals: Record<string, { base: string; applied: string }>) {
   const items = tasks.map(task => {
     const previous = originals[task.id];
-    const base = previous?.applied === task.title ? previous.base : task.title;
+    const prefix = previous?.applied.slice(0, previous.applied.length - previous.base.length);
+    const base = prefix && task.title.startsWith(prefix) ? task.title.slice(prefix.length) : task.title;
     const lookup = base.trim().toLowerCase();
     const aisle = Object.hasOwn(groceries, lookup) ? groceries[lookup] : "Other";
     return { ...task, base, aisle, rank: order.indexOf(aisle) };

@@ -2,3 +2,5 @@ node_modules/
 dist/
 .env
 config/
+.DS_Store
+._*

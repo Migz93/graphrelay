@@ -83,6 +83,7 @@ async function graph<T>(path: string, body?: object): Promise<T> {
     method: body ? "PATCH" : "GET",
     headers: { Authorization: "Bearer " + await tokenRequest, "Content-Type": "application/json" },
     body: body ? JSON.stringify(body) : undefined,
+    redirect: "error",
     signal: AbortSignal.timeout(15000),
   });
   if (!response.ok) throw new Error("Microsoft Graph returned " + response.status + ".");

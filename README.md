@@ -12,7 +12,7 @@ Use .env.example as a reference. Set an administrator password and a long random
 
 Create a disposable list in Microsoft To Do, share it with the other shopper, and set it to Alphabetical on each phone. Enroll that list in GraphRelay and select named or number-only prefixes. Try adding Peas from both phones. GraphRelay checks enrolled lists every 90 seconds and shows title changes under View activity.
 
-The grocery dictionary is small. Unrecognized items fall into Other. Only open items are renamed. Turning prefixes off restores open titles that still match a title applied by GraphRelay. Duplicate deletion and the ms-ical port are future work.
+The grocery dictionary is small. Unrecognized items fall into Other. Only open items are renamed. Turning prefixes off restores open titles that still carry the prefix applied by GraphRelay. Duplicate deletion and the ms-ical port are future work.
 
 ## Development
 
