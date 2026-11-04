@@ -459,8 +459,7 @@ function ListDetail({ list, refresh }: { list: List; refresh: () => Promise<void
   </Page>;
 }
 
-function EnrollList({ refresh }: { refresh: () => Promise<void> }) {
-  const [selected, setSelected] = useState("");
+function useListDirectory() {
   const [directory, setDirectory] = useState<{ lists: List[]; directoryReady: boolean; directoryError: string; syncing: boolean; connected: boolean }>();
   const [error, setError] = useState("");
   useEffect(() => {
@@ -472,6 +471,34 @@ function EnrollList({ refresh }: { refresh: () => Promise<void> }) {
     const timer = window.setInterval(() => void load(), 3000);
     return () => { active = false; window.clearInterval(timer); };
   }, []);
+  return { directory, setDirectory, error, setError };
+}
+
+function AvailableLists() {
+  const { directory, error } = useListDirectory();
+  const available = directory?.lists ?? [];
+  const message = error || directory?.directoryError;
+  return <SectionCard title="Available to enroll">
+    {message && <ErrorBanner message={message} />}
+    {available.length ? <ul className="grid gap-2">
+      {available.map(list => <li key={list.id}>
+        <Link to={{ pathname: "/todo/enroll", search: new URLSearchParams({ list: list.id }).toString() }} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-background-container-low px-4 py-3 hover:bg-background-bright">
+          <span className="font-medium">{list.displayName}{list.isShared && <small className="ml-2 text-on-surface-variant">Shared</small>}</span>
+          <span className="text-sm text-on-surface-variant">Enroll →</span>
+        </Link>
+      </li>)}
+    </ul> : directory && (
+      !directory.connected ? <Link to="/settings">Connect Microsoft in Settings</Link>
+      : directory.directoryReady ? <p>All available lists are enrolled.</p>
+      : <p>Waiting for the first Microsoft list sync.</p>
+    )}
+  </SectionCard>;
+}
+
+function EnrollList({ refresh }: { refresh: () => Promise<void> }) {
+  const [params, setParams] = useSearchParams();
+  const selected = params.get("list") ?? "";
+  const { directory, setDirectory, error, setError } = useListDirectory();
   async function refreshDirectory() {
     if (!directory) return;
     setError("");
@@ -495,7 +522,7 @@ function EnrollList({ refresh }: { refresh: () => Promise<void> }) {
     {directory?.connected && !directory.directoryReady && <p>Waiting for GraphRelay to sync available Microsoft lists.</p>}
     {available.length ? <SectionCard title="Choose a Microsoft To Do list">
       <label className="grid gap-2 text-sm">Microsoft To Do list
-        <SelectInput value={selected} onChange={setSelected}>
+        <SelectInput value={list?.id ?? ""} onChange={value => setParams(value ? { list: value } : {}, { replace: true })}>
           <option value="">Choose a list</option>
           {available.map(list => <option key={list.id} value={list.id}>{list.displayName}{list.isShared ? " (shared)" : ""}</option>)}
         </SelectInput>
@@ -549,6 +576,7 @@ function ToDo() {
             </li>)}
           </ul> : <p>No lists enrolled yet.</p>}
         </SectionCard>
+        <AvailableLists />
       </Page>} />
       <Route path="enroll" element={<EnrollList refresh={refresh} />} />
       <Route path=":listId" element={<EnrolledList lists={lists} refresh={refresh} />} />
