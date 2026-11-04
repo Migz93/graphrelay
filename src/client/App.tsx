@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Link, Navigate, Route, Routes, useSearchParams } from "react-router-dom";
+import { Link, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import Layout from "./components/Layout";
 import { ErrorBanner, Page, PageHeader, PageLoading } from "./components/Page";
 import { SectionCard, SelectInput, SettingRow, TextInput, primaryButtonClass, secondaryButtonClass } from "./components/FormControls";
@@ -167,7 +167,7 @@ function ItemAisles({ path, aisles, refresh }: { path: string; aisles: string[];
   useEffect(() => { void load(); }, [path]);
   return <div className="grid gap-3 rounded-lg bg-background-container-low p-4">
     <div className="flex flex-wrap items-center justify-between gap-2">
-      <h3 className="font-medium">Item aisles</h3>
+      <h2 className="font-medium">Open items</h2>
       <button className={secondaryButtonClass} disabled={busy} onClick={() => void load()}>Refresh items</button>
     </div>
     <p className="text-sm text-on-surface-variant">Changes are saved for items with the same name on this list.</p>
@@ -175,23 +175,40 @@ function ItemAisles({ path, aisles, refresh }: { path: string; aisles: string[];
     {notice && <p role="status" className="text-sm text-success">{notice}</p>}
     {!items && busy && <p>Loading open items…</p>}
     {items?.length === 0 && <p>No open items.</p>}
-    {items?.map(item => <label key={item.id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
-      <span className="break-all">{item.name}</span>
-      <SelectInput aria-label={"Aisle for " + item.name} value={item.aisle} onChange={aisle => void change(item, aisle)} disabled={busy}>
-        {aisles.map(aisle => <option key={aisle} value={aisle}>{aisle}</option>)}
-      </SelectInput>
-    </label>)}
+    {aisles.map(aisle => {
+      const group = items?.filter(item => item.aisle === aisle);
+      if (!group?.length) return null;
+      return <section key={aisle} className="grid gap-2 rounded-lg border border-outline-variant/30 bg-background-container p-3">
+        <h4 className="font-headline font-semibold">{aisle}</h4>
+        <ul className="divide-y divide-outline-variant/30">
+          {group.map(item => <li key={item.id}>
+            <label className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+              <span className="break-all">{item.name}</span>
+              <SelectInput aria-label={"Aisle for " + item.name} value={item.aisle} onChange={value => void change(item, value)} disabled={busy}>
+                {aisles.map(option => <option key={option} value={option}>{option}</option>)}
+              </SelectInput>
+            </label>
+          </li>)}
+        </ul>
+      </section>;
+    })}
   </div>;
 }
 
-function ListCard({ list, refresh }: { list: List; refresh: () => Promise<void> }) {
+function listUrl(id: string) {
+  return "/todo/" + encodeURIComponent(id);
+}
+
+function runStatus(list: List) {
+  return list.lastRun ? "Last run · " + new Date(list.lastRun).toLocaleString() : "No runs yet";
+}
+
+function ListSettings({ list, refresh }: { list: List; refresh: () => Promise<void> }) {
   const [mode, setMode] = useState(list.mode);
   const [order, setOrder] = useState(list.order);
-  const [history, setHistory] = useState<Activity[]>();
-  const [showItems, setShowItems] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const path = "/lists/" + encodeURIComponent(list.id);
+  const navigate = useNavigate();
   function move(index: number, direction: number) {
     const reordered = [...order];
     [reordered[index], reordered[index + direction]] = [reordered[index + direction], reordered[index]];
@@ -201,25 +218,17 @@ function ListCard({ list, refresh }: { list: List; refresh: () => Promise<void> 
     setError("");
     setBusy(true);
     try {
-      await api(path, "PUT", { mode, order });
-      if (history) setHistory(await api<Activity[]>(path + "/activity"));
+      await api("/lists/" + encodeURIComponent(list.id), "PUT", { mode, order });
+      await refresh();
+      navigate(listUrl(list.id), { replace: !list.enrolled });
     } catch (error) {
       setError((error as Error).message);
-    } finally {
       await refresh();
+    } finally {
       setBusy(false);
     }
   }
-  async function activity() {
-    if (history) { setHistory(undefined); return; }
-    setError("");
-    try {
-      setHistory(await api<Activity[]>(path + "/activity"));
-    } catch (error) {
-      setError((error as Error).message);
-    }
-  }
-  return <SectionCard title={list.displayName} description={list.isShared ? "Shared list" : "Personal list"}>
+  return <SectionCard title="Prefix and aisle order" description="Choose how GraphRelay groups items and set the list to Alphabetical in Microsoft To Do.">
     {(error || list.error) && <ErrorBanner message={error || list.error!} />}
     <label className="grid gap-2 text-sm">Prefix style
       <SelectInput value={mode} onChange={setMode}>
@@ -237,23 +246,78 @@ function ListCard({ list, refresh }: { list: List; refresh: () => Promise<void> 
         </div>
       </li>)}
     </ol>}
-    <div className="flex flex-wrap items-center gap-3">
-      <button className={primaryButtonClass} disabled={busy} onClick={() => void save()}>{list.enrolled ? "Save and run" : "Enroll and run"}</button>
-      {list.enrolled && <button className={secondaryButtonClass} aria-expanded={showItems} onClick={() => setShowItems(!showItems)}>{showItems ? "Hide item aisles" : "Edit item aisles"}</button>}
-      {list.enrolled && <button className={secondaryButtonClass} aria-expanded={!!history} onClick={() => void activity()}>{history ? "Hide activity" : "View activity"}</button>}
-      <span className="text-sm text-on-surface-variant">{list.lastRun ? "Last run · " + new Date(list.lastRun).toLocaleString() : "No runs yet"}</span>
-    </div>
-    {showItems && <ItemAisles path={path} aisles={list.order} refresh={refresh} />}
-    {history && <ul className="grid gap-2 text-sm">
-      {history.length ? history.map((item, index) => <li key={index}><time className="mr-2 text-on-surface-variant">{item.created} UTC</time>{item.message}</li>) : <li>No title changes yet.</li>}
-    </ul>}
+    <button className={primaryButtonClass} disabled={busy} onClick={() => void save()}>{list.enrolled ? "Save and run" : "Enroll and run"}</button>
   </SectionCard>;
+}
+
+function ListDetail({ list, refresh }: { list: List; refresh: () => Promise<void> }) {
+  const [history, setHistory] = useState<Activity[]>();
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [error, setError] = useState("");
+  const path = "/lists/" + encodeURIComponent(list.id);
+  async function activity() {
+    if (history) { setHistory(undefined); return; }
+    setError("");
+    setLoadingHistory(true);
+    try {
+      setHistory(await api<Activity[]>(path + "/activity"));
+    } catch (error) {
+      setError((error as Error).message);
+    } finally {
+      setLoadingHistory(false);
+    }
+  }
+  return <Page className="space-y-5">
+    <Link to="/todo" className="text-sm text-on-surface-variant">← To Do</Link>
+    <PageHeader title={list.displayName}>
+      <Link className={secondaryButtonClass} to={listUrl(list.id) + "/settings"}>List settings</Link>
+      <button className={secondaryButtonClass} disabled={loadingHistory} aria-expanded={!!history} onClick={() => void activity()}>{history ? "Hide activity" : "View activity"}</button>
+    </PageHeader>
+    <p className="text-sm text-on-surface-variant">{runStatus(list)}</p>
+    {(error || list.error) && <ErrorBanner message={error || list.error!} />}
+    {history && <SectionCard title="Activity">
+      <ul className="grid gap-2 text-sm">
+        {history.length ? history.map((item, index) => <li key={index}><time className="mr-2 text-on-surface-variant">{item.created} UTC</time>{item.message}</li>) : <li>No title changes yet.</li>}
+      </ul>
+    </SectionCard>}
+    <ItemAisles path={path} aisles={list.order} refresh={refresh} />
+  </Page>;
+}
+
+function EnrollList({ lists, refresh }: { lists: List[]; refresh: () => Promise<void> }) {
+  const [selected, setSelected] = useState("");
+  const available = lists.filter(list => !list.enrolled);
+  const list = available.find(list => list.id === selected);
+  return <Page className="space-y-5">
+    <Link to="/todo" className="text-sm text-on-surface-variant">← To Do</Link>
+    <PageHeader title="Enroll a list" />
+    {available.length ? <SectionCard title="Choose a Microsoft To Do list">
+      <label className="grid gap-2 text-sm">Microsoft To Do list
+        <SelectInput value={selected} onChange={setSelected}>
+          <option value="">Choose a list</option>
+          {available.map(list => <option key={list.id} value={list.id}>{list.displayName}{list.isShared ? " (shared)" : ""}</option>)}
+        </SelectInput>
+      </label>
+    </SectionCard> : <p>All available lists are enrolled.</p>}
+    {list && <ListSettings key={list.id} list={list} refresh={refresh} />}
+  </Page>;
+}
+
+function EnrolledList({ lists, refresh, settings = false }: { lists: List[]; refresh: () => Promise<void>; settings?: boolean }) {
+  const { listId } = useParams();
+  const list = lists.find(list => list.enrolled && list.id === listId);
+  if (!list) return <Page><PageHeader title="List unavailable" /><Link to="/todo">Back to enrolled lists</Link></Page>;
+  if (!settings) return <ListDetail key={list.id} list={list} refresh={refresh} />;
+  return <Page className="space-y-5">
+    <Link to={listUrl(list.id)} className="text-sm text-on-surface-variant">← {list.displayName}</Link>
+    <PageHeader title="List settings" />
+    <ListSettings key={list.id} list={list} refresh={refresh} />
+  </Page>;
 }
 
 function ToDo() {
   const [lists, setLists] = useState<List[]>();
   const [error, setError] = useState("");
-  const [selected, setSelected] = useState("");
   async function refresh() {
     try {
       setLists(await api<List[]>("/lists"));
@@ -263,23 +327,32 @@ function ToDo() {
     }
   }
   useEffect(() => { void refresh(); }, []);
-  const available = lists?.filter(list => !list.enrolled);
-  const visible = lists?.filter(list => list.enrolled || list.id === selected);
-  return <Page className="space-y-5">
+  if (!lists) return <Page>
     <PageHeader title="To Do" />
-    <p className="text-on-surface-variant">Set the enrolled list to Alphabetical in Microsoft To Do. GraphRelay checks for new items about every 90 seconds.</p>
-    {error && <><ErrorBanner message={error} /><Link to="/settings">Open Microsoft connection settings</Link></>}
-    {!lists && !error && <PageLoading label="Loading Microsoft To Do lists…" />}
-    {!!available?.length && <SectionCard title="Enroll a list" description="Use a disposable shared list for the first run.">
-      <label className="grid gap-2 text-sm">Microsoft To Do list
-        <SelectInput value={selected} onChange={setSelected}>
-          <option value="">Choose a list</option>
-          {available.map(list => <option key={list.id} value={list.id}>{list.displayName}{list.isShared ? " (shared)" : ""}</option>)}
-        </SelectInput>
-      </label>
-    </SectionCard>}
-    {visible?.map(list => <ListCard key={list.id} list={list} refresh={refresh} />)}
+    {error ? <><ErrorBanner message={error} /><Link to="/settings">Open Microsoft connection settings</Link></> : <PageLoading label="Loading Microsoft To Do lists…" />}
   </Page>;
+  const enrolled = lists.filter(list => list.enrolled);
+  return <>
+    {error && <Page><ErrorBanner message={error} /></Page>}
+    <Routes>
+      <Route index element={<Page className="space-y-5">
+        <PageHeader title="To Do"><Link className={primaryButtonClass} to="/todo/enroll">Enroll a list</Link></PageHeader>
+        <SectionCard title="Enrolled lists">
+          {enrolled.length ? <ul className="grid gap-2">
+            {enrolled.map(list => <li key={list.id}>
+              <Link to={listUrl(list.id)} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-background-container-low px-4 py-3 hover:bg-background-bright">
+                <span className="font-medium">{list.displayName}{list.isShared && <small className="ml-2 text-on-surface-variant">Shared</small>}</span>
+                <span className="text-sm text-on-surface-variant">{list.error ? "Needs attention" : runStatus(list)}</span>
+              </Link>
+            </li>)}
+          </ul> : <p>No lists enrolled yet.</p>}
+        </SectionCard>
+      </Page>} />
+      <Route path="enroll" element={<EnrollList lists={lists} refresh={refresh} />} />
+      <Route path=":listId" element={<EnrolledList lists={lists} refresh={refresh} />} />
+      <Route path=":listId/settings" element={<EnrolledList lists={lists} refresh={refresh} settings />} />
+    </Routes>
+  </>;
 }
 
 export default function App() {
@@ -294,7 +367,7 @@ export default function App() {
   return <Layout user={{ username: "Administrator", displayName: "Administrator" }} onLogout={() => void api("/logout", "POST").then(refresh).catch(error => setError(error.message))}>
     <Routes>
       <Route path="/dashboard" element={<Page><PageHeader title="Dashboard" /><SectionCard title="Microsoft account companion" description="Manage Microsoft To Do lists and calendar subscriptions."><Link className={primaryButtonClass} to="/settings">Microsoft connection</Link></SectionCard></Page>} />
-      <Route path="/todo" element={<ToDo />} />
+      <Route path="/todo/*" element={<ToDo />} />
       <Route path="/calendar" element={<Page><PageHeader title="Calendar Feeds" /><SectionCard title="Calendar feeds" description="The ms-ical integration is planned for a later milestone." /></Page>} />
       <Route path="/settings" element={<Settings />} />
       <Route path="*" element={<Navigate replace to="/dashboard" />} />
