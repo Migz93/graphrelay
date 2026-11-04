@@ -45,6 +45,9 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS aisle_corrections (list_id TEXT, item_key TEXT, aisle TEXT NOT NULL, PRIMARY KEY(list_id, item_key));
   CREATE TABLE IF NOT EXISTS activity (id INTEGER PRIMARY KEY, list_id TEXT, created TEXT DEFAULT CURRENT_TIMESTAMP, message TEXT);
 `);
+if (!db.pragma("table_info(lists)").some(column => (column as { name: string }).name === "auto_cleanup")) {
+  db.exec("ALTER TABLE lists ADD COLUMN auto_cleanup INTEGER NOT NULL DEFAULT 0");
+}
 function read(key: string) {
   return (db.prepare("SELECT value FROM state WHERE key = ?").get(key) as { value: string } | undefined)?.value;
 }
@@ -123,7 +126,7 @@ async function collection<T>(path: string) {
   return values;
 }
 type GraphList = { id: string; displayName: string; isShared: boolean; isOwner: boolean };
-type Enrolled = { id: string; name: string; mode: Mode; aisle_order: string };
+type Enrolled = { id: string; name: string; mode: Mode; aisle_order: string; auto_cleanup: number };
 type Task = {
   id: string;
   title: string;
@@ -162,7 +165,7 @@ function planList(list: Enrolled, tasks: Task[], recoverTitles = false) {
   const corrections = new Map(rows.map(row => [row.item_key, row.aisle]));
   return planTitles(tasks, list.mode, JSON.parse(list.aisle_order), originals, corrections);
 }
-async function run(list: Enrolled) {
+async function run(list: Enrolled, scheduled = false) {
   if (active.has(list.id)) return;
   active.add(list.id);
   try {
@@ -185,11 +188,15 @@ async function run(list: Enrolled) {
       log(list.id, task.title + " → " + task.next);
       changed++;
     }
+    if (scheduled && list.auto_cleanup) {
+      const cleanup = await removeDuplicates(list);
+      if (cleanup.failed) throw new Error("Run failed. Automatic duplicate cleanup could not remove " + cleanup.failed + " copies.");
+    }
     write("last:" + list.id, new Date().toISOString());
     write("error:" + list.id, "");
     return changed;
   } catch (error) {
-    const message = error instanceof Error && error.message.startsWith("Microsoft Graph returned") ? error.message : "Run failed. Check the Microsoft connection.";
+    const message = error instanceof Error && (error.message.startsWith("Microsoft Graph returned") || error.message.startsWith("Run failed")) ? error.message : "Run failed. Check the Microsoft connection.";
     if (read("error:" + list.id) !== message) log(list.id, message);
     write("error:" + list.id, message);
     throw new Error(message);
@@ -202,8 +209,9 @@ setInterval(async () => {
   if (!msal || !read("account") || sweeping) return;
   sweeping = true;
   try {
-    for (const list of db.prepare("SELECT * FROM lists").all() as Enrolled[]) {
-      if (list.mode !== "off" || read("error:" + list.id)) await run(list).catch(() => undefined);
+    for (const { id } of db.prepare("SELECT id FROM lists").all() as { id: string }[]) {
+      const list = enrolledList(id);
+      if (list && (list.mode !== "off" || list.auto_cleanup || read("error:" + id))) await run(list, true).catch(() => undefined);
     }
   } finally {
     sweeping = false;
@@ -343,11 +351,16 @@ app.get("/api/lists", async (_req, res) => {
   res.json(lists.map(list => ({
     ...list, enrolled: enrolled.has(list.id), mode: enrolled.get(list.id)?.mode ?? "named",
     order: JSON.parse(enrolled.get(list.id)?.aisle_order ?? JSON.stringify(aisles)),
+    autoCleanup: !!enrolled.get(list.id)?.auto_cleanup,
     lastRun: read("last:" + list.id), error: read("error:" + list.id),
   })));
 });
 app.put("/api/lists/:id", async (req, res) => {
-  const { mode, order } = req.body;
+  const { mode, order, autoCleanup } = req.body ?? {};
+  if (autoCleanup !== undefined && typeof autoCleanup !== "boolean") {
+    res.status(400).json({ error: "Automatic cleanup must be on or off." });
+    return;
+  }
   if (!["named", "number", "off"].includes(mode) || !Array.isArray(order) || order.length !== aisles.length || !aisles.every(aisle => order.includes(aisle))) {
     res.status(400).json({ error: "Choose a prefix style and include each aisle once." });
     return;
@@ -355,8 +368,10 @@ app.put("/api/lists/:id", async (req, res) => {
   const list = (await getLists()).find(list => list.id === req.params.id);
   if (!list) { res.sendStatus(404); return; }
   if (active.has(list.id)) { res.status(409).json({ error: "Wait for the current run to finish." }); return; }
-  db.prepare("INSERT OR REPLACE INTO lists VALUES (?, ?, ?, ?)").run(list.id, list.displayName, mode, JSON.stringify(order));
-  await run({ id: list.id, name: list.displayName, mode, aisle_order: JSON.stringify(order) });
+  const autoCleanupValue = autoCleanup === undefined ? enrolledList(list.id)?.auto_cleanup ?? 0 : Number(autoCleanup);
+  const aisleOrder = JSON.stringify(order);
+  db.prepare("INSERT OR REPLACE INTO lists (id, name, mode, aisle_order, auto_cleanup) VALUES (?, ?, ?, ?, ?)").run(list.id, list.displayName, mode, aisleOrder, autoCleanupValue);
+  await run({ id: list.id, name: list.displayName, mode, aisle_order: aisleOrder, auto_cleanup: autoCleanupValue });
   res.sendStatus(204);
 });
 function enrolledList(id: string) {
@@ -425,6 +440,50 @@ app.get("/api/lists/:id/duplicates", async (req, res) => {
 });
 type ProposedDuplicate = { id: string; keepId: string; key: string; completed: boolean; keepCompleted: boolean };
 
+async function removeDuplicates(list: Enrolled, proposed?: ProposedDuplicate[]) {
+  const path = taskPath(list.id);
+  const groups = new Map(duplicateGroups(planList(list, await collection<Task>(path))).map(group => [group.key, group]));
+  const proposals = proposed ?? [...groups.values()].flatMap(group => group.copies.map(copy => ({
+    id: copy.id, key: group.key, keepId: group.keep.id,
+    completed: copy.status === "completed", keepCompleted: group.keep.status === "completed",
+  })));
+  const requests = new Map(proposals.map(copy => [copy.id, copy]));
+  let removed = 0;
+  let skipped = 0;
+  let failed = 0;
+  for (const request of requests.values()) {
+    const group = groups.get(request.key);
+    const copy = group?.copies.find(task => task.id === request.id);
+    if (!group || !copy || group.keep.id !== request.keepId
+      || (group.keep.status === "completed") !== request.keepCompleted
+      || (copy.status === "completed") !== request.completed) {
+      skipped++;
+      continue;
+    }
+    const copyPath = path + "/" + encodeURIComponent(copy.id);
+    const keepPath = path + "/" + encodeURIComponent(group.keep.id);
+    try {
+      if (detailFlags(copy).length || (await checklistFlags(copyPath)).length) {
+        skipped++;
+        continue;
+      }
+      const [latestCopy, latestKeep] = await Promise.all([graph<Task>(copyPath), graph<Task>(keepPath)]);
+      const latest = planList(list, [latestCopy, latestKeep]);
+      if (latestCopy.status !== copy.status || latestKeep.status !== group.keep.status
+        || latest.some(task => itemKey(task.base) !== group.key) || detailFlags(latestCopy).length) {
+        skipped++;
+        continue;
+      }
+      await graph(copyPath, undefined, "DELETE");
+      removed++;
+      log(list.id, (proposed ? "Removed duplicate: " : "Automatically removed duplicate: ") + latestCopy.title);
+    } catch {
+      failed++;
+    }
+  }
+  return { removed, skipped, failed };
+}
+
 app.post("/api/lists/:id/duplicates/remove", async (req, res) => {
   const list = enrolledList(req.params.id);
   if (!list) { res.sendStatus(404); return; }
@@ -441,43 +500,7 @@ app.post("/api/lists/:id/duplicates/remove", async (req, res) => {
   }
   active.add(list.id);
   try {
-    const path = taskPath(list.id);
-    const groups = new Map(duplicateGroups(planList(list, await collection<Task>(path))).map(group => [group.key, group]));
-    const requests = new Map((proposed as ProposedDuplicate[]).map(copy => [copy.id, copy]));
-    let removed = 0;
-    let skipped = 0;
-    let failed = 0;
-    for (const request of requests.values()) {
-      const group = groups.get(request.key);
-      const copy = group?.copies.find(task => task.id === request.id);
-      if (!group || !copy || group.keep.id !== request.keepId
-        || (group.keep.status === "completed") !== request.keepCompleted
-        || (copy.status === "completed") !== request.completed) {
-        skipped++;
-        continue;
-      }
-      const copyPath = path + "/" + encodeURIComponent(copy.id);
-      const keepPath = path + "/" + encodeURIComponent(group.keep.id);
-      try {
-        if (detailFlags(copy).length || (await checklistFlags(copyPath)).length) {
-          skipped++;
-          continue;
-        }
-        const [latestCopy, latestKeep] = await Promise.all([graph<Task>(copyPath), graph<Task>(keepPath)]);
-        const latest = planList(list, [latestCopy, latestKeep]);
-        if (latestCopy.status !== copy.status || latestKeep.status !== group.keep.status
-          || latest.some(task => itemKey(task.base) !== group.key) || detailFlags(latestCopy).length) {
-          skipped++;
-          continue;
-        }
-        await graph(copyPath, undefined, "DELETE");
-        removed++;
-        log(list.id, "Removed duplicate: " + latestCopy.title);
-      } catch {
-        failed++;
-      }
-    }
-    res.json({ removed, skipped, failed });
+    res.json(await removeDuplicates(list, proposed as ProposedDuplicate[]));
   } finally {
     active.delete(list.id);
   }

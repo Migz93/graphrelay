@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import Layout from "./components/Layout";
 import { ErrorBanner, Page, PageHeader, PageLoading } from "./components/Page";
-import { dangerButtonClass, SectionCard, SelectInput, SettingRow, TextInput, primaryButtonClass, secondaryButtonClass } from "./components/FormControls";
+import { dangerButtonClass, SectionCard, SelectInput, SettingRow, SettingToggle, TextInput, primaryButtonClass, secondaryButtonClass } from "./components/FormControls";
 
 async function api<T>(path: string, method = "GET", body?: object): Promise<T> {
   const response = await fetch("/api" + path, {
@@ -22,6 +22,7 @@ type Connection = { account: string | null; redirectUri: string; clientId: strin
 type List = {
   id: string; displayName: string; isShared: boolean; isOwner: boolean;
   enrolled: boolean; mode: string; order: string[]; lastRun?: string; error?: string;
+  autoCleanup: boolean;
 };
 type Activity = { created: string; message: string };
 
@@ -205,6 +206,7 @@ function runStatus(list: List) {
 
 function ListSettings({ list, refresh }: { list: List; refresh: () => Promise<void> }) {
   const [mode, setMode] = useState(list.mode);
+  const [autoCleanup, setAutoCleanup] = useState(list.autoCleanup);
   const [order, setOrder] = useState(list.order);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -218,7 +220,7 @@ function ListSettings({ list, refresh }: { list: List; refresh: () => Promise<vo
     setError("");
     setBusy(true);
     try {
-      await api("/lists/" + encodeURIComponent(list.id), "PUT", { mode, order });
+      await api("/lists/" + encodeURIComponent(list.id), "PUT", { mode, order, autoCleanup });
       await refresh();
       navigate(listUrl(list.id), { replace: !list.enrolled });
     } catch (error) {
@@ -246,6 +248,7 @@ function ListSettings({ list, refresh }: { list: List; refresh: () => Promise<vo
         </div>
       </li>)}
     </ol>}
+    <SettingToggle label="Automatic duplicate cleanup" hint="During background runs, keep one open copy when possible and remove eligible duplicates. Copies flagged for review are skipped." checked={autoCleanup} onChange={setAutoCleanup} />
     <button className={primaryButtonClass} disabled={busy} onClick={() => void save()}>{list.enrolled ? "Save and run" : "Enroll and run"}</button>
   </SectionCard>;
 }
