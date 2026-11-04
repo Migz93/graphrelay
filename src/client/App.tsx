@@ -1,4 +1,6 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { X } from "lucide-react";
+import { useDialogA11y } from "./hooks/useDialogA11y";
+import { useEffect, useId, useState, type FormEvent, type ReactNode } from "react";
 import { Link, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import Layout, { type BuildInfo } from "./components/Layout";
 import { ErrorBanner, Page, PageHeader, PageLoading } from "./components/Page";
@@ -22,7 +24,7 @@ type Connection = { account: string | null; redirectUri: string; clientId: strin
 type List = {
   id: string; displayName: string; isShared: boolean; isOwner: boolean;
   enrolled: boolean; mode: string; order: string[]; lastRun?: string; error?: string;
-  autoCleanup: boolean;
+  autoCleanup: boolean; profileId: string; syncMinutes: number | null;
 };
 type Activity = { created: string; message: string };
 
@@ -168,7 +170,6 @@ function MicrosoftSettings() {
         </details>}
       </>}
     </SectionCard>
-    <PollingSettings />
   </Page>;
 }
 
@@ -189,7 +190,7 @@ function Settings({ build }: { build: BuildInfo }) {
 
 type ListItem = { id: string; name: string; aisle: string };
 
-function ItemAisles({ path, aisles, refresh }: { path: string; aisles: string[]; refresh: () => Promise<void> }) {
+function ItemAisles({ path, aisles, grouped, refresh }: { path: string; aisles: string[]; grouped: boolean; refresh: () => Promise<void> }) {
   const [snapshot, setSnapshot] = useState<{ items: ListItem[]; syncedAt: string | null }>();
   const items = snapshot?.items;
   const [error, setError] = useState("");
@@ -237,15 +238,18 @@ function ItemAisles({ path, aisles, refresh }: { path: string; aisles: string[];
       <h2 className="font-medium">Open items</h2>
       <button className={secondaryButtonClass} disabled={busy} onClick={() => void load()}>Refresh items</button>
     </div>
-    <p className="text-sm text-on-surface-variant">Changes are saved for items with the same name on this list.</p>
+    {grouped && <p className="text-sm text-on-surface-variant">Group corrections are saved for items with the same name on this list.</p>}
     {error && <ErrorBanner message={error} />}
     {notice && <p role="status" className="text-sm text-success">{notice}</p>}
     {!items && busy && <p>Loading open items…</p>}
     {snapshot?.syncedAt === null && <p>Waiting for the first Microsoft sync.</p>}
     {snapshot?.syncedAt && <p className="text-xs text-on-surface-variant">Items synced {new Date(snapshot.syncedAt).toLocaleString()}</p>}
     {snapshot?.syncedAt && items?.length === 0 && <p>No open items.</p>}
-    {aisles.map(aisle => {
-      const group = items?.filter(item => item.aisle === aisle);
+    {!grouped && !!items?.length && <ul className="divide-y divide-outline-variant/30 rounded-lg border border-outline-variant/30 bg-background-container px-3">
+      {[...items].sort((a, b) => a.name.localeCompare(b.name)).map(item => <li key={item.id} className="break-words py-2 text-sm">{item.name}</li>)}
+    </ul>}
+    {grouped && aisles.map(aisle => {
+      const group = items?.filter(item => (aisles.includes(item.aisle) ? item.aisle : "Other") === aisle);
       if (!group?.length) return null;
       return <section key={aisle} className="grid gap-2 rounded-lg border border-outline-variant/30 bg-background-container p-3">
         <h4 className="font-headline font-semibold">{aisle}</h4>
@@ -253,7 +257,7 @@ function ItemAisles({ path, aisles, refresh }: { path: string; aisles: string[];
           {group.map(item => <li key={item.id}>
             <label className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
               <span className="break-all">{item.name}</span>
-              <SelectInput aria-label={"Aisle for " + item.name} value={item.aisle} onChange={value => void change(item, value)} disabled={busy}>
+              <SelectInput aria-label={"Group for " + item.name} value={aisles.includes(item.aisle) ? item.aisle : "Other"} onChange={value => void change(item, value)} disabled={busy}>
                 {aisles.map(option => <option key={option} value={option}>{option}</option>)}
               </SelectInput>
             </label>
@@ -272,53 +276,171 @@ function runStatus(list: List) {
   return list.lastRun ? "Last run · " + new Date(list.lastRun).toLocaleString() : "No runs yet";
 }
 
-function ListSettings({ list, refresh }: { list: List; refresh: () => Promise<void> }) {
+type GroupingProfile = { id: string; name: string; grocery: boolean; usedBy: number; groups: { name: string; matches: string[] }[] };
+
+function SettingsDialog({ title, tabs, selected, select, close, children }: {
+  title: string; tabs: string[]; selected: string; select: (tab: string) => void; close: () => void; children: ReactNode;
+}) {
+  const id = useId();
+  const ref = useDialogA11y<HTMLDivElement>(true, close);
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm" onClick={close}>
+    <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={id} className="max-h-[90dvh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-outline-variant/20 bg-background-container p-6 shadow-xl" onClick={event => event.stopPropagation()}>
+      <div className="mb-4 flex items-center justify-between gap-2">
+        <h2 id={id} className="font-headline text-lg font-semibold">{title}</h2>
+        <button type="button" aria-label="Close settings" data-overlay-initial-focus onClick={close} className="rounded-lg p-1.5 text-on-surface-variant hover:bg-background-container-high hover:text-on-surface"><X size={18} /></button>
+      </div>
+      <div className="mb-5 flex flex-wrap gap-2 border-b border-outline-variant/30 pb-3" aria-label="Settings sections">
+        {tabs.map(tab => <button key={tab} type="button" aria-pressed={selected === tab} className={selected === tab ? primaryButtonClass : secondaryButtonClass} onClick={() => select(tab)}>{tab}</button>)}
+      </div>
+      {children}
+    </div>
+  </div>;
+}
+
+function ListSettings({ list, refresh, close }: { list: List; refresh: () => Promise<void>; close: () => void }) {
+  const [tab, setTab] = useState("Grouping");
   const [mode, setMode] = useState(list.mode);
+  const [profileId, setProfileId] = useState(list.profileId);
   const [autoCleanup, setAutoCleanup] = useState(list.autoCleanup);
-  const [order, setOrder] = useState(list.order);
+  const [syncMinutes, setSyncMinutes] = useState(String(list.syncMinutes ?? ""));
+  const [profiles, setProfiles] = useState<GroupingProfile[]>();
+  const [polling, setPolling] = useState<{ minutes: number; options: number[] }>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const navigate = useNavigate();
-  function move(index: number, direction: number) {
-    const reordered = [...order];
-    [reordered[index], reordered[index + direction]] = [reordered[index + direction], reordered[index]];
-    setOrder(reordered);
-  }
+  useEffect(() => {
+    void Promise.all([api<GroupingProfile[]>("/grouping-profiles"), api<{ minutes: number; options: number[] }>("/polling")])
+      .then(([values, interval]) => { setProfiles(values); setPolling(interval); })
+      .catch(error => setError(error.message));
+  }, []);
   async function save() {
     setError("");
     setBusy(true);
     try {
-      await api("/lists/" + encodeURIComponent(list.id), "PUT", { mode, order, autoCleanup });
+      await api("/lists/" + encodeURIComponent(list.id), "PUT", { mode, profileId, autoCleanup, syncMinutes: syncMinutes ? Number(syncMinutes) : null });
       await refresh();
-      navigate(listUrl(list.id), { replace: !list.enrolled });
+      close();
     } catch (error) {
       setError((error as Error).message);
-      await refresh();
     } finally {
       setBusy(false);
     }
   }
-  return <SectionCard title="Prefix and aisle order" description="Choose how GraphRelay groups items and set the list to Alphabetical in Microsoft To Do.">
-    {(error || list.error) && <ErrorBanner message={error || list.error!} />}
-    <label className="grid gap-2 text-sm">Prefix style
-      <SelectInput value={mode} onChange={setMode}>
-        <option value="named">Named · 03 Frozen · Peas</option>
-        <option value="number">Number only · 014 · Peas</option>
-        <option value="off">Off</option>
-      </SelectInput>
-    </label>
-    {mode !== "off" && <ol className="grid gap-2" aria-label="Aisle order">
-      {order.map((aisle, index) => <li key={aisle} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-background-container-low px-3 py-2">
-        <span>{index + 1}. {aisle}</span>
-        <div className="flex gap-2">
-          <button aria-label={"Move " + aisle + " up"} className={secondaryButtonClass} disabled={!index || busy} onClick={() => move(index, -1)}>↑</button>
-          <button aria-label={"Move " + aisle + " down"} className={secondaryButtonClass} disabled={index === order.length - 1 || busy} onClick={() => move(index, 1)}>↓</button>
+  return <SettingsDialog title={list.displayName + " settings"} tabs={["Grouping", "Duplicates", "Sync"]} selected={tab} select={setTab} close={() => { if (!busy) close(); }}>
+    <div className="grid gap-4">
+      {error && <ErrorBanner message={error} />}
+      {tab === "Grouping" && <>
+        <SettingToggle label="Group items" hint="Apply a grouping profile to this list. Use Alphabetical sort in Microsoft To Do." checked={mode !== "off"} onChange={enabled => setMode(enabled ? "named" : "off")} />
+        {mode !== "off" && <>
+          <label className="grid gap-2 text-sm">Grouping profile
+            <SelectInput value={profileId} onChange={setProfileId} disabled={!profiles}>
+              {profiles?.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
+            </SelectInput>
+          </label>
+          <label className="grid gap-2 text-sm">Prefix style
+            <SelectInput value={mode} onChange={setMode}>
+              <option value="named">Named · 03 Frozen · Peas</option>
+              <option value="number">Number only · 014 · Peas</option>
+            </SelectInput>
+          </label>
+        </>}
+      </>}
+      {tab === "Duplicates" && <SettingToggle label="Automatic duplicate cleanup" hint="Keep one open copy when possible and skip copies flagged for review." checked={autoCleanup} onChange={setAutoCleanup} />}
+      {tab === "Sync" && <label className="grid gap-2 text-sm">Sync interval
+        <SelectInput value={syncMinutes} onChange={setSyncMinutes} disabled={!polling}>
+          <option value="">Use default{polling ? " (" + polling.minutes + " min)" : ""}</option>
+          {polling?.options.map(minutes => <option key={minutes} value={minutes}>{minutes} min</option>)}
+        </SelectInput>
+      </label>}
+      <div><button className={primaryButtonClass} disabled={busy || !profiles || !polling} onClick={() => void save()}>{busy ? "Saving…" : "Save list settings"}</button></div>
+    </div>
+  </SettingsDialog>;
+}
+
+function GroupingProfiles() {
+  const [profiles, setProfiles] = useState<GroupingProfile[]>();
+  const [selected, setSelected] = useState("");
+  const [name, setName] = useState("");
+  const [groups, setGroups] = useState<{ name: string; matches: string }[]>([]);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [busy, setBusy] = useState(false);
+  const current = profiles?.find(profile => profile.id === selected);
+  function choose(id: string, values = profiles) {
+    const profile = values?.find(profile => profile.id === id);
+    setSelected(id);
+    setName(profile?.name ?? "");
+    setGroups(profile?.groups.map(group => ({ name: group.name, matches: group.matches.join("\n") })) ?? [{ name: "", matches: "" }, { name: "Other", matches: "" }]);
+    setError("");
+    setNotice("");
+  }
+  useEffect(() => {
+    void api<GroupingProfile[]>("/grouping-profiles").then(values => { setProfiles(values); choose("groceries", values); }).catch(error => setError(error.message));
+  }, []);
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const saved = await api<GroupingProfile>("/grouping-profiles/" + selected, "PUT", { name, groups: groups.map(group => ({ name: group.name, matches: group.matches.split("\n") })) });
+      const values = await api<GroupingProfile[]>("/grouping-profiles");
+      setProfiles(values);
+      choose(saved.id, values);
+      setNotice("Profile saved. Lists using it will update on their next sync.");
+    } catch (error) {
+      setError((error as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  function move(index: number, direction: number) {
+    const next = [...groups];
+    [next[index], next[index + direction]] = [next[index + direction], next[index]];
+    setGroups(next);
+  }
+  return <div className="grid gap-4">
+    {error && <ErrorBanner message={error} />}
+    {notice && <p role="status" className="text-sm text-success">{notice}</p>}
+    {profiles && <form onSubmit={save} className="grid gap-4">
+      <label className="grid gap-2 text-sm">Profile
+        <SelectInput value={selected} onChange={value => choose(value)} disabled={busy}>
+          {profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
+          <option value="new">Create a profile…</option>
+        </SelectInput>
+      </label>
+      {current && <p className="text-sm text-on-surface-variant">Used by {current.usedBy} {current.usedBy === 1 ? "list" : "lists"}.{current.grocery ? " Includes the built-in grocery matcher." : ""}</p>}
+      <fieldset disabled={busy} className="grid gap-4">
+        <label className="grid gap-2 text-sm">Profile name<TextInput value={name} onChange={setName} required maxLength={80} /></label>
+        <p className="text-sm text-on-surface-variant">Groups are applied in this order. Enter one exact item name per line. Items without a match go to Other.</p>
+        {groups.map((group, index) => {
+          const locked = group.name === "Other" || !!current?.grocery && ["Produce", "Meat", "Frozen", "Dairy", "Bakery", "Pantry"].includes(group.name);
+          const update = (changes: Partial<typeof group>) => setGroups(groups.map((value, i) => i === index ? { ...value, ...changes } : value));
+          return <div key={index} className="grid gap-2 rounded-lg border border-outline-variant/30 p-3">
+            <label className="grid gap-2 text-sm">Group {index + 1}<TextInput value={group.name} onChange={value => update({ name: value })} required maxLength={40} readOnly={locked} /></label>
+            <label className="grid gap-2 text-sm">Item matches
+              <textarea className="min-h-20 rounded-lg border border-outline-variant/30 bg-background-container-high p-2" value={group.matches} onChange={event => update({ matches: event.target.value })} />
+            </label>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" className={secondaryButtonClass} disabled={!index} onClick={() => move(index, -1)}>Move up</button>
+              <button type="button" className={secondaryButtonClass} disabled={index === groups.length - 1} onClick={() => move(index, 1)}>Move down</button>
+              {!locked && <button type="button" className={secondaryButtonClass} onClick={() => setGroups(groups.filter((_, i) => i !== index))}>Remove group</button>}
+            </div>
+          </div>;
+        })}
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className={secondaryButtonClass} disabled={groups.length >= 30} onClick={() => setGroups([...groups, { name: "", matches: "" }])}>Add group</button>
+          <button className={primaryButtonClass}>Save profile</button>
         </div>
-      </li>)}
-    </ol>}
-    <SettingToggle label="Automatic duplicate cleanup" hint="During background runs, keep one open copy when possible and remove eligible duplicates. Copies flagged for review are skipped." checked={autoCleanup} onChange={setAutoCleanup} />
-    <button className={primaryButtonClass} disabled={busy} onClick={() => void save()}>{list.enrolled ? "Save and run" : "Enroll and run"}</button>
-  </SectionCard>;
+      </fieldset>
+    </form>}
+  </div>;
+}
+
+function ToDoSettings({ close }: { close: () => void }) {
+  const [tab, setTab] = useState("Grouping profiles");
+  return <SettingsDialog title="To Do settings" tabs={["Grouping profiles", "Sync defaults"]} selected={tab} select={setTab} close={close}>
+    {tab === "Grouping profiles" ? <GroupingProfiles /> : <PollingSettings />}
+  </SettingsDialog>;
 }
 
 type DuplicateCopy = { id: string; title: string; completed: boolean; date?: string; flags: string[] };
@@ -400,6 +522,7 @@ function DuplicatePreview({ path, onRemoved }: { path: string; onRemoved: () => 
 }
 
 function ListDetail({ list, refresh }: { list: List; refresh: () => Promise<void> }) {
+  const [settings, setSettings] = useState(false);
   const [showDuplicates, setShowDuplicates] = useState(false);
   const [itemRevision, setItemRevision] = useState(0);
   const [previewRevision, setPreviewRevision] = useState(0);
@@ -442,7 +565,7 @@ function ListDetail({ list, refresh }: { list: List; refresh: () => Promise<void
     <Link to="/todo" className="text-sm text-on-surface-variant">← To Do</Link>
     <PageHeader title={list.displayName}>
       <button className={primaryButtonClass} disabled={syncing} onClick={() => void sync()}>{syncing ? "Syncing…" : "Sync Now"}</button>
-      <Link className={secondaryButtonClass} to={listUrl(list.id) + "/settings"}>List settings</Link>
+      <button className={secondaryButtonClass} onClick={() => setSettings(true)}>List settings</button>
       <button className={secondaryButtonClass} aria-expanded={showDuplicates} onClick={() => setShowDuplicates(!showDuplicates)}>{showDuplicates ? "Hide duplicates" : "Preview duplicates"}</button>
       <button className={secondaryButtonClass} disabled={loadingHistory} aria-expanded={!!history} onClick={() => void activity()}>{history ? "Hide activity" : "View activity"}</button>
     </PageHeader>
@@ -455,7 +578,8 @@ function ListDetail({ list, refresh }: { list: List; refresh: () => Promise<void
       </ul>
     </SectionCard>}
     {showDuplicates && <DuplicatePreview key={previewRevision} path={path} onRemoved={() => { setItemRevision(value => value + 1); setHistory(undefined); }} />}
-    <ItemAisles key={itemRevision} path={path} aisles={list.order} refresh={refresh} />
+    <ItemAisles key={itemRevision} path={path} aisles={list.order} grouped={list.mode !== "off"} refresh={refresh} />
+    {settings && <ListSettings list={list} refresh={async () => { await refresh(); setItemRevision(value => value + 1); setPreviewRevision(value => value + 1); }} close={() => setSettings(false)} />}
   </Page>;
 }
 
@@ -496,6 +620,8 @@ function AvailableLists() {
 }
 
 function EnrollList({ refresh }: { refresh: () => Promise<void> }) {
+  const navigate = useNavigate();
+  const [enrolling, setEnrolling] = useState(false);
   const [params, setParams] = useSearchParams();
   const selected = params.get("list") ?? "";
   const { directory, setDirectory, error, setError } = useListDirectory();
@@ -512,6 +638,20 @@ function EnrollList({ refresh }: { refresh: () => Promise<void> }) {
   }
   const available = directory?.lists ?? [];
   const list = available.find(list => list.id === selected);
+  async function enroll() {
+    if (!list) return;
+    setEnrolling(true);
+    setError("");
+    try {
+      await api("/lists/" + encodeURIComponent(list.id) + "/enroll", "POST");
+      await refresh();
+      navigate(listUrl(list.id), { replace: true });
+    } catch (error) {
+      setError((error as Error).message);
+    } finally {
+      setEnrolling(false);
+    }
+  }
   return <Page className="space-y-5">
     <Link to="/todo" className="text-sm text-on-surface-variant">← To Do</Link>
     <PageHeader title="Enroll a list">
@@ -528,23 +668,21 @@ function EnrollList({ refresh }: { refresh: () => Promise<void> }) {
         </SelectInput>
       </label>
     </SectionCard> : directory?.directoryReady && <p>All available lists are enrolled.</p>}
-    {list && <ListSettings key={list.id} list={list} refresh={refresh} />}
+    {list && <SectionCard title={list.displayName} description="Enrollment syncs the list into GraphRelay. You can enable automations later in List settings.">
+      <button className={primaryButtonClass} disabled={enrolling} onClick={() => void enroll()}>{enrolling ? "Enrolling…" : "Enroll list"}</button>
+    </SectionCard>}
   </Page>;
 }
 
-function EnrolledList({ lists, refresh, settings = false }: { lists: List[]; refresh: () => Promise<void>; settings?: boolean }) {
+function EnrolledList({ lists, refresh }: { lists: List[]; refresh: () => Promise<void> }) {
   const { listId } = useParams();
   const list = lists.find(list => list.enrolled && list.id === listId);
   if (!list) return <Page><PageHeader title="List unavailable" /><Link to="/todo">Back to enrolled lists</Link></Page>;
-  if (!settings) return <ListDetail key={list.id} list={list} refresh={refresh} />;
-  return <Page className="space-y-5">
-    <Link to={listUrl(list.id)} className="text-sm text-on-surface-variant">← {list.displayName}</Link>
-    <PageHeader title="List settings" />
-    <ListSettings key={list.id} list={list} refresh={refresh} />
-  </Page>;
+  return <ListDetail key={list.id} list={list} refresh={refresh} />;
 }
 
 function ToDo() {
+  const [settings, setSettings] = useState(false);
   const [lists, setLists] = useState<List[]>();
   const [error, setError] = useState("");
   async function refresh() {
@@ -565,7 +703,7 @@ function ToDo() {
     {error && <Page><ErrorBanner message={error} /></Page>}
     <Routes>
       <Route index element={<Page className="space-y-5">
-        <PageHeader title="To Do"><Link className={primaryButtonClass} to="/todo/enroll">Enroll a list</Link></PageHeader>
+        <PageHeader title="To Do"><button className={secondaryButtonClass} onClick={() => setSettings(true)}>To Do settings</button><Link className={primaryButtonClass} to="/todo/enroll">Enroll a list</Link></PageHeader>
         <SectionCard title="Enrolled lists">
           {enrolled.length ? <ul className="grid gap-2">
             {enrolled.map(list => <li key={list.id}>
@@ -577,10 +715,11 @@ function ToDo() {
           </ul> : <p>No lists enrolled yet.</p>}
         </SectionCard>
         <AvailableLists />
+        {settings && <ToDoSettings close={() => { setSettings(false); void refresh(); }} />}
       </Page>} />
       <Route path="enroll" element={<EnrollList refresh={refresh} />} />
       <Route path=":listId" element={<EnrolledList lists={lists} refresh={refresh} />} />
-      <Route path=":listId/settings" element={<EnrolledList lists={lists} refresh={refresh} settings />} />
+      <Route path=":listId/settings" element={<EnrolledList lists={lists} refresh={refresh} />} />
     </Routes>
   </>;
 }

@@ -5,6 +5,7 @@ import { ConfidentialClientApplication, CryptoProvider } from "@azure/msal-node"
 import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { groceryAisle } from "./groceries.js";
 import { duplicateGroups } from "./duplicates.js";
 import { aisles, itemKey, planTitles, type Mode } from "./ordering.js";
 
@@ -43,6 +44,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS titles (list_id TEXT, task_id TEXT, base TEXT, applied TEXT, PRIMARY KEY(list_id, task_id));
   CREATE TABLE IF NOT EXISTS pending_titles (list_id TEXT, task_id TEXT, base TEXT, applied TEXT, PRIMARY KEY(list_id, task_id));
   CREATE TABLE IF NOT EXISTS aisle_corrections (list_id TEXT, item_key TEXT, aisle TEXT NOT NULL, PRIMARY KEY(list_id, item_key));
+  CREATE TABLE IF NOT EXISTS group_corrections (list_id TEXT, profile_id TEXT, item_key TEXT, group_name TEXT NOT NULL, PRIMARY KEY(list_id, profile_id, item_key));
   CREATE TABLE IF NOT EXISTS activity (id INTEGER PRIMARY KEY, list_id TEXT, created TEXT DEFAULT CURRENT_TIMESTAMP, message TEXT);
 `);
 if (!(db.pragma("table_info(lists)") as { name: string }[]).some(column => column.name === "auto_cleanup")) {
@@ -172,6 +174,32 @@ function log(listId: string, message: string) {
 function taskPath(listId: string) {
   return "me/todo/lists/" + encodeURIComponent(listId) + "/tasks";
 }
+type Profile = { id: string; name: string; groups: { name: string; matches: string[] }[]; grocery: boolean };
+const profileKey = (id: string) => "list-profile:" + id;
+const intervalKey = (id: string) => "list-interval:" + id;
+const builtInProfile: Profile = { id: "groceries", name: "Groceries", grocery: true, groups: aisles.map(name => ({ name, matches: [] })) };
+function profiles(): Profile[] {
+  return JSON.parse(read("grouping-profiles") ?? JSON.stringify([builtInProfile]));
+}
+function listProfile(list: Enrolled): Profile {
+  return profiles().find(profile => profile.id === (read(profileKey(list.id)) ?? "groceries")) ?? builtInProfile;
+}
+function migrateProfiles() {
+  if (read("grouping-profiles")) return;
+  db.transaction(() => {
+    const values = [builtInProfile];
+    for (const list of db.prepare("SELECT * FROM lists").all() as Enrolled[]) {
+      const order = JSON.parse(list.aisle_order) as string[];
+      if (order.join() === aisles.join()) continue;
+      const profile = { ...builtInProfile, id: randomBytes(12).toString("hex"), name: list.name + " groceries", groups: order.map(name => ({ name, matches: [] })) };
+      values.push(profile);
+      write(profileKey(list.id), profile.id);
+    }
+    write("grouping-profiles", JSON.stringify(values));
+  })();
+}
+migrateProfiles();
+
 function planList(list: Enrolled, tasks: Task[], recoverTitles = false) {
   const stored = db.prepare("SELECT task_id, base, applied FROM titles WHERE list_id = ?").all(list.id) as { task_id: string; base: string; applied: string }[];
   const originals = Object.fromEntries(stored.map(row => [row.task_id, row]));
@@ -185,9 +213,15 @@ function planList(list: Enrolled, tasks: Task[], recoverTitles = false) {
     db.prepare("INSERT OR REPLACE INTO titles VALUES (?, ?, ?, ?)").run(list.id, task.id, interrupted.base, interrupted.applied);
     db.prepare("DELETE FROM pending_titles WHERE list_id = ? AND task_id = ?").run(list.id, task.id);
   }
-  const rows = db.prepare("SELECT item_key, aisle FROM aisle_corrections WHERE list_id = ?").all(list.id) as { item_key: string; aisle: string }[];
-  const corrections = new Map(rows.map(row => [row.item_key, row.aisle]));
-  return planTitles(tasks, list.mode, JSON.parse(list.aisle_order), originals, corrections);
+  const profile = listProfile(list);
+  const rows = (profile.grocery
+    ? db.prepare("SELECT item_key, aisle AS group_name FROM aisle_corrections WHERE list_id = ?").all(list.id)
+    : db.prepare("SELECT item_key, group_name FROM group_corrections WHERE list_id = ? AND profile_id = ?").all(list.id, profile.id)
+  ) as { item_key: string; group_name: string }[];
+  const order = profile.groups.map(group => group.name);
+  const corrections = new Map(rows.filter(row => order.includes(row.group_name)).map(row => [row.item_key, row.group_name]));
+  const matches = new Map(profile.groups.flatMap(group => group.matches.map(match => [match, group.name] as const)));
+  return planTitles(tasks, list.mode, order, originals, corrections, name => matches.get(name) ?? (profile.grocery ? groceryAisle(name) : "Other"));
 }
 async function run(list: Enrolled, includeCleanup = false) {
   if (active.has(list.id)) return;
@@ -225,6 +259,8 @@ async function run(list: Enrolled, includeCleanup = false) {
     throw new Error(message);
   } finally {
     active.delete(list.id);
+    lastAttempts.set(list.id, Date.now());
+    schedulePoll();
   }
 }
 const pollingOptions = [1, 2, 5, 10, 30, 60];
@@ -232,20 +268,37 @@ const pollingKey = "polling-minutes";
 function pollingMinutes() {
   return Number(read(pollingKey) ?? 1);
 }
+const lastAttempts = new Map<string, number>();
+let lastDirectoryPoll = 0;
 let sweeping = false;
 let pollTimer: NodeJS.Timeout | undefined;
-function schedulePoll(delay = pollingMinutes() * 60_000) {
+function intervalMinutes(id: string) {
+  return Number(read(intervalKey(id)) || pollingMinutes());
+}
+function schedulePoll(delay?: number) {
   clearTimeout(pollTimer);
-  if (!sweeping) pollTimer = setTimeout(pollLists, delay).unref();
+  if (sweeping) return;
+  if (delay === undefined) {
+    const now = Date.now();
+    const directoryDue = lastDirectoryPoll + pollingMinutes() * 60_000;
+    const lists = db.prepare("SELECT id FROM lists").all() as { id: string }[];
+    const next = lists.reduce((due, { id }) => active.has(id) ? due : Math.min(due, (lastAttempts.get(id) ?? 0) + intervalMinutes(id) * 60_000), directoryDue);
+    delay = msal && read("username") ? Math.max(0, next - now) : pollingMinutes() * 60_000;
+  }
+  pollTimer = setTimeout(pollLists, delay).unref();
 }
 async function pollLists() {
   sweeping = true;
   try {
     if (!msal || !read("account") || !read("username")) return;
-    const directory = syncDirectory();
+    let directory: Promise<void> | undefined;
+    if (Date.now() >= lastDirectoryPoll + pollingMinutes() * 60_000) {
+      lastDirectoryPoll = Date.now();
+      directory = syncDirectory();
+    }
     for (const { id } of db.prepare("SELECT id FROM lists").all() as { id: string }[]) {
       const list = enrolledList(id);
-      if (list) await run(list, true).catch(() => undefined);
+      if (list && !active.has(id) && Date.now() >= (lastAttempts.get(id) ?? 0) + intervalMinutes(id) * 60_000) await run(list, true).catch(() => undefined);
     }
     await directory;
   } finally {
@@ -379,6 +432,7 @@ app.get("/api/microsoft/callback", async (req, res) => {
     }
     write("account", result.account.homeAccountId);
     write("username", result.account.username || "Microsoft account");
+    lastDirectoryPoll = 0;
     schedulePoll(0);
     res.redirect("/settings");
   } catch (error) {
@@ -408,7 +462,7 @@ app.get("/api/lists", (_req, res) => {
   const directory = new Map(localDirectory().map(list => [list.id, list]));
   const lists = enrolled.map(list => ({
     id: list.id, displayName: list.name, isShared: directory.get(list.id)?.isShared,
-    enrolled: true, mode: list.mode, order: JSON.parse(list.aisle_order), autoCleanup: !!list.auto_cleanup,
+    enrolled: true, mode: list.mode, order: listProfile(list).groups.map(group => group.name), profileId: listProfile(list).id, syncMinutes: Number(read(intervalKey(list.id))) || null, autoCleanup: !!list.auto_cleanup,
     lastRun: read("last:" + list.id), error: read("error:" + list.id),
   }));
   res.json(lists);
@@ -416,7 +470,7 @@ app.get("/api/lists", (_req, res) => {
 app.get("/api/list-directory", (_req, res) => {
   const enrolled = new Set((db.prepare("SELECT id FROM lists").all() as { id: string }[]).map(list => list.id));
   const lists = localDirectory().filter(list => !enrolled.has(list.id)).map(list => ({
-    ...list, enrolled: false, mode: "named", order: aisles, autoCleanup: false,
+    ...list, enrolled: false, mode: "off", order: [], autoCleanup: false,
   }));
   res.json({ lists, directoryReady: read(directoryKey) !== undefined, directoryError, syncing: !!directorySync, connected: !!read("username") });
 });
@@ -425,24 +479,61 @@ app.post("/api/list-directory/refresh", (_req, res) => {
   void syncDirectory();
   res.sendStatus(204);
 });
+app.get("/api/grouping-profiles", (_req, res) => {
+  const lists = db.prepare("SELECT * FROM lists").all() as Enrolled[];
+  res.json(profiles().map(profile => ({
+    ...profile, usedBy: lists.filter(list => list.mode !== "off" && listProfile(list).id === profile.id).length,
+  })));
+});
+app.put("/api/grouping-profiles/:id", (req, res) => {
+  const values = profiles();
+  const existing = values.find(profile => profile.id === req.params.id);
+  if (!existing && req.params.id !== "new") { res.sendStatus(404); return; }
+  const { name, groups } = req.body ?? {};
+  if (typeof name !== "string" || !name.trim() || name.trim().length > 80
+    || !Array.isArray(groups) || groups.length < 2 || groups.length > 30
+    || !groups.every(group => typeof group?.name === "string" && !!group.name.trim() && group.name.trim().length <= 40
+      && Array.isArray(group.matches) && group.matches.every((match: unknown) => typeof match === "string"))) {
+    res.status(400).json({ error: "Enter a profile name and between 2 and 30 named groups." });
+    return;
+  }
+  const normalized = (groups as Profile["groups"]).map(group => ({ name: group.name.trim(), matches: group.matches.map(itemKey).filter(Boolean) }));
+  const names = normalized.map(group => itemKey(group.name));
+  const matches = normalized.flatMap(group => group.matches);
+  if (!normalized.some(group => group.name === "Other") || new Set(names).size !== names.length || new Set(matches).size !== matches.length) {
+    res.status(400).json({ error: "Keep the Other group and use each group name and item match only once." });
+    return;
+  }
+  const profile = { id: existing?.id ?? randomBytes(12).toString("hex"), grocery: existing?.grocery ?? false, name: name.trim(), groups: normalized };
+  write("grouping-profiles", JSON.stringify(existing ? values.map(value => value.id === existing.id ? profile : value) : [...values, profile]));
+  res.json(profile);
+});
+app.post("/api/lists/:id/enroll", async (req, res) => {
+  const id = req.params.id;
+  if (enrolledList(id)) { res.sendStatus(204); return; }
+  if (!localDirectory().some(list => list.id === id)) { res.sendStatus(404); return; }
+  const list = await graph<GraphList>("me/todo/lists/" + encodeURIComponent(id));
+  db.prepare("INSERT OR IGNORE INTO lists (id, name, mode, aisle_order, auto_cleanup) VALUES (?, ?, 'off', ?, 0)").run(id, list.displayName, JSON.stringify(aisles));
+  schedulePoll(0);
+  res.sendStatus(204);
+});
 app.put("/api/lists/:id", async (req, res) => {
-  const { mode, order, autoCleanup } = req.body ?? {};
-  if (autoCleanup !== undefined && typeof autoCleanup !== "boolean") {
-    res.status(400).json({ error: "Automatic cleanup must be on or off." });
-    return;
-  }
-  if (!["named", "number", "off"].includes(mode) || !Array.isArray(order) || order.length !== aisles.length || !aisles.every(aisle => order.includes(aisle))) {
-    res.status(400).json({ error: "Choose a prefix style and include each aisle once." });
-    return;
-  }
-  const existing = enrolledList(req.params.id);
-  const list = existing ? { id: existing.id, displayName: existing.name } : localDirectory().find(list => list.id === req.params.id);
+  const list = enrolledList(req.params.id);
   if (!list) { res.sendStatus(404); return; }
+  const { mode, profileId, autoCleanup, syncMinutes } = req.body ?? {};
+  if (!["named", "number", "off"].includes(mode) || !profiles().some(profile => profile.id === profileId)
+    || typeof autoCleanup !== "boolean" || (syncMinutes !== null && !pollingOptions.includes(syncMinutes))) {
+    res.status(400).json({ error: "Choose a valid grouping profile, prefix style and sync interval." });
+    return;
+  }
   if (active.has(list.id)) { res.status(409).json({ error: "Wait for the current run to finish." }); return; }
-  const autoCleanupValue = autoCleanup === undefined ? enrolledList(list.id)?.auto_cleanup ?? 0 : Number(autoCleanup);
-  const aisleOrder = JSON.stringify(order);
-  db.prepare("INSERT OR REPLACE INTO lists (id, name, mode, aisle_order, auto_cleanup) VALUES (?, ?, ?, ?, ?)").run(list.id, list.displayName, mode, aisleOrder, autoCleanupValue);
-  await run({ id: list.id, name: list.displayName, mode, aisle_order: aisleOrder, auto_cleanup: autoCleanupValue });
+  db.transaction(() => {
+    db.prepare("UPDATE lists SET mode = ?, auto_cleanup = ? WHERE id = ?").run(mode, Number(autoCleanup), list.id);
+    write(profileKey(list.id), profileId);
+    write(intervalKey(list.id), syncMinutes === null ? "" : String(syncMinutes));
+  })();
+  // Saving settings applies grouping without triggering duplicate deletion.
+  await run(enrolledList(list.id)!).catch(() => undefined);
   res.sendStatus(204);
 });
 function enrolledList(id: string) {
@@ -465,7 +556,7 @@ app.get("/api/lists/:id/items", (req, res) => {
 });
 app.put("/api/lists/:id/items/:taskId/aisle", async (req, res) => {
   const { aisle, name } = req.body ?? {};
-  if (!aisles.includes(aisle) || typeof name !== "string" || !itemKey(name)) {
+  if (typeof aisle !== "string" || typeof name !== "string" || !itemKey(name)) {
     res.status(400).json({ error: "Choose a valid item and aisle." });
     return;
   }
@@ -474,12 +565,18 @@ app.put("/api/lists/:id/items/:taskId/aisle", async (req, res) => {
   const path = taskPath(list.id) + "/" + encodeURIComponent(req.params.taskId);
   const task = await graph<Task>(path);
   const currentList = enrolledList(list.id)!;
+  const profile = listProfile(currentList);
+  if (currentList.mode === "off" || !profile.groups.some(group => group.name === aisle)) {
+    res.status(409).json({ error: "Grouping settings changed. Refresh the list and try again." });
+    return;
+  }
   const [item] = planList(currentList, [task]);
   if (task.status === "completed" || itemKey(item.base) !== itemKey(name)) {
     res.status(409).json({ error: "This item changed in Microsoft To Do. Refresh the items and try again." });
     return;
   }
-  db.prepare("INSERT OR REPLACE INTO aisle_corrections VALUES (?, ?, ?)").run(list.id, itemKey(item.base), aisle);
+  if (profile.grocery) db.prepare("INSERT OR REPLACE INTO aisle_corrections VALUES (?, ?, ?)").run(list.id, itemKey(item.base), aisle);
+  else db.prepare("INSERT OR REPLACE INTO group_corrections VALUES (?, ?, ?, ?)").run(list.id, profile.id, itemKey(item.base), aisle);
   const applied = !active.has(list.id) && await run(currentList).then(() => true, () => false);
   res.json({ applied });
 });
@@ -621,6 +718,7 @@ app.post("/api/lists/:id/duplicates/remove", async (req, res) => {
     res.json(result);
   } finally {
     active.delete(list.id);
+    schedulePoll();
   }
 });
 app.get("/api/lists/:id/activity", (req, res) => {

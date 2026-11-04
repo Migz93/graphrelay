@@ -7,13 +7,14 @@ export function itemKey(name: string) {
   return name.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-export function planTitles<T extends { id: string; title: string }>(tasks: T[], mode: Mode, order: string[], originals: Record<string, { base: string; applied: string }>, corrections: ReadonlyMap<string, string> = new Map()) {
+export function planTitles<T extends { id: string; title: string }>(tasks: T[], mode: Mode, order: string[], originals: Record<string, { base: string; applied: string }>, corrections: ReadonlyMap<string, string> = new Map(), match = groceryAisle) {
   const items = tasks.map(task => {
     const previous = originals[task.id];
     const prefix = previous?.applied.slice(0, previous.applied.length - previous.base.length);
     const base = prefix && task.title.startsWith(prefix) ? task.title.slice(prefix.length) : task.title;
     const lookup = itemKey(base);
-    const aisle = corrections.get(lookup) ?? groceryAisle(lookup);
+    const assigned = corrections.get(lookup) ?? match(lookup);
+    const aisle = order.includes(assigned) ? assigned : "Other";
     return { ...task, base, aisle, rank: order.indexOf(aisle) };
   });
   items.sort((a, b) => a.rank - b.rank || a.base.localeCompare(b.base) || a.id.localeCompare(b.id));
