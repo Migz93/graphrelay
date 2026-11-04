@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import Layout from "./components/Layout";
 import { ErrorBanner, Page, PageHeader, PageLoading } from "./components/Page";
-import { SectionCard, SelectInput, SettingRow, TextInput, primaryButtonClass, secondaryButtonClass } from "./components/FormControls";
+import { dangerButtonClass, SectionCard, SelectInput, SettingRow, TextInput, primaryButtonClass, secondaryButtonClass } from "./components/FormControls";
 
 async function api<T>(path: string, method = "GET", body?: object): Promise<T> {
   const response = await fetch("/api" + path, {
@@ -253,10 +253,32 @@ function ListSettings({ list, refresh }: { list: List; refresh: () => Promise<vo
 type DuplicateCopy = { id: string; title: string; completed: boolean; date?: string; flags: string[] };
 type DuplicateGroup = { key: string; name: string; keep: DuplicateCopy; copies: DuplicateCopy[] };
 
-function DuplicatePreview({ path }: { path: string }) {
+function DuplicatePreview({ path, onRemoved }: { path: string; onRemoved: () => void }) {
   const [groups, setGroups] = useState<DuplicateGroup[]>();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [result, setResult] = useState("");
+  const proposed = groups?.flatMap(group => group.copies.filter(copy => !copy.flags.length).map(copy => ({
+    id: copy.id, key: group.key, keepId: group.keep.id, completed: copy.completed, keepCompleted: group.keep.completed,
+  }))) ?? [];
+  async function remove() {
+    setRemoving(true);
+    setError("");
+    setResult("");
+    try {
+      const summary = await api<{ removed: number; skipped: number; failed: number }>(path + "/duplicates/remove", "POST", { proposed });
+      setResult(`Removed ${summary.removed} · Skipped ${summary.skipped} · Failed ${summary.failed}`);
+      await load();
+      if (summary.removed) onRemoved();
+    } catch (error) {
+      setError((error as Error).message);
+    } finally {
+      setRemoving(false);
+      setConfirming(false);
+    }
+  }
   async function load() {
     setBusy(true);
     setError("");
@@ -270,8 +292,20 @@ function DuplicatePreview({ path }: { path: string }) {
     }
   }
   useEffect(() => { void load(); }, [path]);
-  return <SectionCard title="Duplicate preview" description="GraphRelay keeps an open copy when possible. This preview makes no changes to Microsoft To Do.">
-    <div><button className={secondaryButtonClass} disabled={busy} onClick={() => void load()}>Refresh preview</button></div>
+  return <SectionCard title="Duplicate preview" description="GraphRelay keeps an open copy when possible. Review the proposed removals before applying them to Microsoft To Do.">
+    <div className="flex flex-wrap gap-2">
+      <button className={secondaryButtonClass} disabled={busy || removing} onClick={() => { setConfirming(false); setResult(""); void load(); }}>Refresh preview</button>
+      {!!proposed.length && !confirming && <button className={secondaryButtonClass} disabled={busy || removing} onClick={() => setConfirming(true)}>Remove proposed duplicates ({proposed.length})</button>}
+    </div>
+    {confirming && !removing && <div className="grid gap-2 rounded-lg border border-warning/35 p-3">
+      <p>Remove {proposed.length} proposed {proposed.length === 1 ? "copy" : "copies"} from Microsoft To Do? Copies flagged for review will be skipped.</p>
+      <div className="flex flex-wrap gap-2">
+        <button className={dangerButtonClass} onClick={() => void remove()}>Confirm removal</button>
+        <button className={secondaryButtonClass} disabled={removing} onClick={() => setConfirming(false)}>Cancel</button>
+      </div>
+    </div>}
+    {removing && <p role="status">Removing eligible duplicates…</p>}
+    {result && <p role="status">{result}</p>}
     {error && <ErrorBanner message={error} />}
     {busy && <p role="status">Checking open and completed items…</p>}
     {groups?.length === 0 && <p>No duplicate names found.</p>}
@@ -294,6 +328,7 @@ function DuplicatePreview({ path }: { path: string }) {
 
 function ListDetail({ list, refresh }: { list: List; refresh: () => Promise<void> }) {
   const [showDuplicates, setShowDuplicates] = useState(false);
+  const [itemRevision, setItemRevision] = useState(0);
   const [history, setHistory] = useState<Activity[]>();
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [error, setError] = useState("");
@@ -324,8 +359,8 @@ function ListDetail({ list, refresh }: { list: List; refresh: () => Promise<void
         {history.length ? history.map((item, index) => <li key={index}><time className="mr-2 text-on-surface-variant">{item.created} UTC</time>{item.message}</li>) : <li>No title changes yet.</li>}
       </ul>
     </SectionCard>}
-    {showDuplicates && <DuplicatePreview path={path} />}
-    <ItemAisles path={path} aisles={list.order} refresh={refresh} />
+    {showDuplicates && <DuplicatePreview path={path} onRemoved={() => { setItemRevision(value => value + 1); setHistory(undefined); }} />}
+    <ItemAisles key={itemRevision} path={path} aisles={list.order} refresh={refresh} />
   </Page>;
 }
 

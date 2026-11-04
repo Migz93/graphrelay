@@ -98,19 +98,19 @@ async function accessToken() {
   if (!account || !read("username")) throw new Error("Connect Microsoft in Settings.");
   return (await msal.acquireTokenSilent({ account, scopes })).accessToken;
 }
-async function graph<T>(path: string, body?: object): Promise<T> {
+async function graph<T = void>(path: string, body?: object, method = body ? "PATCH" : "GET"): Promise<T> {
   const url = new URL(path, "https://graph.microsoft.com/v1.0/");
   if (url.origin !== "https://graph.microsoft.com" || !url.pathname.startsWith("/v1.0/me/todo/")) throw new Error("Invalid Graph URL.");
   tokenRequest ??= accessToken().finally(() => { tokenRequest = undefined; });
   const response = await fetch(url, {
-    method: body ? "PATCH" : "GET",
+    method,
     headers: { Authorization: "Bearer " + await tokenRequest, "Content-Type": "application/json" },
     body: body ? JSON.stringify(body) : undefined,
     redirect: "error",
     signal: AbortSignal.timeout(15000),
   });
   if (!response.ok) throw new Error("Microsoft Graph returned " + response.status + ".");
-  return await response.json() as T;
+  return response.status === 204 ? undefined as T : await response.json() as T;
 }
 async function collection<T>(path: string) {
   const values: T[] = [];
@@ -388,6 +388,20 @@ app.put("/api/lists/:id/items/:taskId/aisle", async (req, res) => {
   const applied = !active.has(list.id) && await run(currentList).then(() => true, () => false);
   res.json({ applied });
 });
+async function checklistFlags(path: string) {
+  try {
+    const steps = await graph<{ value: unknown[] }>(path + "/checklistItems");
+    return steps.value.length ? ["Checklist steps"] : [];
+  } catch {
+    return ["Checklist could not be checked"];
+  }
+}
+function detailFlags(task: Task) {
+  const flags: string[] = [];
+  if (task.body?.content?.trim()) flags.push("Notes");
+  if (task.hasAttachments) flags.push("Attachments");
+  return flags;
+}
 app.get("/api/lists/:id/duplicates", async (req, res) => {
   const list = enrolledList(req.params.id);
   if (!list) { res.sendStatus(404); return; }
@@ -397,16 +411,7 @@ app.get("/api/lists/:id/duplicates", async (req, res) => {
   const copies = groups.flatMap(group => group.copies);
   for (let index = 0; index < copies.length; index += 5) {
     await Promise.all(copies.slice(index, index + 5).map(async task => {
-      const flags: string[] = [];
-      if (task.body?.content?.trim()) flags.push("Notes");
-      if (task.hasAttachments) flags.push("Attachments");
-      try {
-        const steps = await graph<{ value: unknown[] }>(path + "/" + encodeURIComponent(task.id) + "/checklistItems");
-        if (steps.value.length) flags.push("Checklist steps");
-      } catch {
-        flags.push("Checklist could not be checked");
-      }
-      checks.set(task.id, flags);
+      checks.set(task.id, [...detailFlags(task), ...await checklistFlags(path + "/" + encodeURIComponent(task.id))]);
     }));
   }
   function preview(task: Task & { base: string }) {
@@ -417,6 +422,65 @@ app.get("/api/lists/:id/duplicates", async (req, res) => {
     };
   }
   res.json(groups.map(({ key, keep, copies }) => ({ key, name: keep.base, keep: preview(keep), copies: copies.map(preview) })));
+});
+type ProposedDuplicate = { id: string; keepId: string; key: string; completed: boolean; keepCompleted: boolean };
+
+app.post("/api/lists/:id/duplicates/remove", async (req, res) => {
+  const list = enrolledList(req.params.id);
+  if (!list) { res.sendStatus(404); return; }
+  const proposed = req.body?.proposed;
+  if (!Array.isArray(proposed) || !proposed.length || !proposed.every(copy =>
+    typeof copy?.id === "string" && typeof copy.keepId === "string" && typeof copy.key === "string"
+    && typeof copy.completed === "boolean" && typeof copy.keepCompleted === "boolean")) {
+    res.status(400).json({ error: "Refresh the duplicate preview before removing copies." });
+    return;
+  }
+  if (active.has(list.id)) {
+    res.status(409).json({ error: "Wait for the current list run to finish, then try again." });
+    return;
+  }
+  active.add(list.id);
+  try {
+    const path = taskPath(list.id);
+    const groups = new Map(duplicateGroups(planList(list, await collection<Task>(path))).map(group => [group.key, group]));
+    const requests = new Map((proposed as ProposedDuplicate[]).map(copy => [copy.id, copy]));
+    let removed = 0;
+    let skipped = 0;
+    let failed = 0;
+    for (const request of requests.values()) {
+      const group = groups.get(request.key);
+      const copy = group?.copies.find(task => task.id === request.id);
+      if (!group || !copy || group.keep.id !== request.keepId
+        || (group.keep.status === "completed") !== request.keepCompleted
+        || (copy.status === "completed") !== request.completed) {
+        skipped++;
+        continue;
+      }
+      const copyPath = path + "/" + encodeURIComponent(copy.id);
+      const keepPath = path + "/" + encodeURIComponent(group.keep.id);
+      try {
+        if (detailFlags(copy).length || (await checklistFlags(copyPath)).length) {
+          skipped++;
+          continue;
+        }
+        const [latestCopy, latestKeep] = await Promise.all([graph<Task>(copyPath), graph<Task>(keepPath)]);
+        const latest = planList(list, [latestCopy, latestKeep]);
+        if (latestCopy.status !== copy.status || latestKeep.status !== group.keep.status
+          || latest.some(task => itemKey(task.base) !== group.key) || detailFlags(latestCopy).length) {
+          skipped++;
+          continue;
+        }
+        await graph(copyPath, undefined, "DELETE");
+        removed++;
+        log(list.id, "Removed duplicate: " + latestCopy.title);
+      } catch {
+        failed++;
+      }
+    }
+    res.json({ removed, skipped, failed });
+  } finally {
+    active.delete(list.id);
+  }
 });
 app.get("/api/lists/:id/activity", (req, res) => {
   res.json(db.prepare("SELECT created, message FROM activity WHERE list_id = ? ORDER BY id DESC LIMIT 100").all(req.params.id));
