@@ -1,13 +1,7 @@
+import { groceryAisle } from "./groceries.js";
+
 export const aisles = ["Produce", "Meat", "Frozen", "Dairy", "Bakery", "Pantry", "Other"];
 export type Mode = "named" | "number" | "off";
-
-const groceries: Record<string, string> = {
-  apples: "Produce", bananas: "Produce", carrots: "Produce", onions: "Produce",
-  chicken: "Meat", beef: "Meat", bacon: "Meat", mince: "Meat",
-  peas: "Frozen", pizza: "Frozen", "ice cream": "Frozen", "frozen chips": "Frozen",
-  cheese: "Dairy", milk: "Dairy", butter: "Dairy", yoghurt: "Dairy",
-  bread: "Bakery", rolls: "Bakery", pasta: "Pantry", rice: "Pantry",
-};
 
 export function itemKey(name: string) {
   return name.trim().toLowerCase().replace(/\s+/g, " ");
@@ -19,7 +13,7 @@ export function planTitles<T extends { id: string; title: string }>(tasks: T[], 
     const prefix = previous?.applied.slice(0, previous.applied.length - previous.base.length);
     const base = prefix && task.title.startsWith(prefix) ? task.title.slice(prefix.length) : task.title;
     const lookup = itemKey(base);
-    const aisle = corrections.get(lookup) ?? (Object.hasOwn(groceries, lookup) ? groceries[lookup] : "Other");
+    const aisle = corrections.get(lookup) ?? groceryAisle(lookup);
     return { ...task, base, aisle, rank: order.indexOf(aisle) };
   });
   items.sort((a, b) => a.rank - b.rank || a.base.localeCompare(b.base) || a.id.localeCompare(b.id));
