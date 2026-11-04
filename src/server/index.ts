@@ -135,8 +135,35 @@ type Task = {
   completedDateTime?: { dateTime: string };
   body?: { content?: string };
   hasAttachments?: boolean;
+  lastModifiedDateTime?: string;
 };
 const getLists = () => collection<GraphList>("me/todo/lists");
+const directoryKey = "todo-directory";
+function localDirectory(): GraphList[] {
+  return JSON.parse(read(directoryKey) ?? "[]");
+}
+let directoryError = "";
+let directorySync: Promise<void> | undefined;
+function syncDirectory() {
+  directorySync ??= refreshDirectory().finally(() => { directorySync = undefined; });
+  return directorySync;
+}
+async function refreshDirectory() {
+  const account = read("account");
+  const client = msal;
+  try {
+    const lists = await getLists();
+    if (client !== msal || account !== read("account")) return;
+    db.transaction(() => {
+      write(directoryKey, JSON.stringify(lists));
+      const rename = db.prepare("UPDATE lists SET name = ? WHERE id = ?");
+      for (const list of lists) rename.run(list.displayName, list.id);
+    })();
+    directoryError = "";
+  } catch {
+    if (client === msal && account === read("account")) directoryError = "Microsoft lists could not be refreshed. Showing the last synced data.";
+  }
+}
 const active = new Set<string>();
 function log(listId: string, message: string) {
   db.prepare("INSERT INTO activity (list_id, message) VALUES (?, ?)").run(listId, message);
@@ -144,9 +171,6 @@ function log(listId: string, message: string) {
 }
 function taskPath(listId: string) {
   return "me/todo/lists/" + encodeURIComponent(listId) + "/tasks";
-}
-async function openTasks(listId: string) {
-  return (await collection<Task>(taskPath(listId))).filter(task => task.status !== "completed");
 }
 function planList(list: Enrolled, tasks: Task[], recoverTitles = false) {
   const stored = db.prepare("SELECT task_id, base, applied FROM titles WHERE list_id = ?").all(list.id) as { task_id: string; base: string; applied: string }[];
@@ -170,9 +194,9 @@ async function run(list: Enrolled, includeCleanup = false) {
   active.add(list.id);
   try {
     const path = taskPath(list.id);
-    const tasks = await openTasks(list.id);
+    const tasks = await collection<Task>(path);
     let changed = 0;
-    for (const task of planList(list, tasks, true)) {
+    for (const task of planList(list, tasks.filter(task => task.status !== "completed"), true)) {
       if (task.title === task.next) continue;
       const taskPath = path + "/" + encodeURIComponent(task.id);
       const current = await graph<Task>(taskPath);
@@ -188,10 +212,9 @@ async function run(list: Enrolled, includeCleanup = false) {
       log(list.id, task.title + " → " + task.next);
       changed++;
     }
-    if (includeCleanup && list.auto_cleanup) {
-      const cleanup = await removeDuplicates(list);
-      if (cleanup.failed) throw new Error("Run failed. Automatic duplicate cleanup could not remove " + cleanup.failed + " copies.");
-    }
+    const cleanup = includeCleanup && list.auto_cleanup ? await removeDuplicates(list) : undefined;
+    await syncSnapshot(list, changed || cleanup?.removed || cleanup?.failed ? undefined : tasks);
+    if (cleanup?.failed) throw new Error("Run failed. Automatic duplicate cleanup could not remove " + cleanup.failed + " copies.");
     write("last:" + list.id, new Date().toISOString());
     write("error:" + list.id, "");
     return changed;
@@ -211,24 +234,26 @@ function pollingMinutes() {
 }
 let sweeping = false;
 let pollTimer: NodeJS.Timeout | undefined;
-function schedulePoll() {
+function schedulePoll(delay = pollingMinutes() * 60_000) {
   clearTimeout(pollTimer);
-  if (!sweeping) pollTimer = setTimeout(pollLists, pollingMinutes() * 60_000).unref();
+  if (!sweeping) pollTimer = setTimeout(pollLists, delay).unref();
 }
 async function pollLists() {
   sweeping = true;
   try {
-    if (!msal || !read("account")) return;
+    if (!msal || !read("account") || !read("username")) return;
+    const directory = syncDirectory();
     for (const { id } of db.prepare("SELECT id FROM lists").all() as { id: string }[]) {
       const list = enrolledList(id);
-      if (list && (list.mode !== "off" || list.auto_cleanup || read("error:" + id))) await run(list, true).catch(() => undefined);
+      if (list) await run(list, true).catch(() => undefined);
     }
+    await directory;
   } finally {
     sweeping = false;
     schedulePoll();
   }
 }
-schedulePoll();
+schedulePoll(0);
 
 if (env.TRUST_PROXY === "1") app.set("trust proxy", 1);
 app.use(express.json({ limit: "16kb" }));
@@ -314,7 +339,7 @@ app.put("/api/microsoft", (req, res) => {
   db.transaction(() => {
     write("setup", encrypt(JSON.stringify(configuration)));
     if (setup?.clientId?.toLowerCase() !== clientId) {
-      db.prepare("DELETE FROM state WHERE key IN ('cache', 'username')").run();
+      db.prepare("DELETE FROM state WHERE key IN ('cache', 'username', 'todo-directory')").run();
     }
   })();
   setup = configuration;
@@ -354,6 +379,7 @@ app.get("/api/microsoft/callback", async (req, res) => {
     }
     write("account", result.account.homeAccountId);
     write("username", result.account.username || "Microsoft account");
+    schedulePoll(0);
     res.redirect("/settings");
   } catch (error) {
     const detail = error instanceof Error ? error.message.match(/AADSTS[0-9]{4,10}/)?.[0] : undefined;
@@ -377,15 +403,27 @@ app.put("/api/polling", (req, res) => {
   }
   res.sendStatus(204);
 });
-app.get("/api/lists", async (_req, res) => {
-  const lists = await getLists();
-  const enrolled = new Map((db.prepare("SELECT * FROM lists").all() as Enrolled[]).map(list => [list.id, list]));
-  res.json(lists.map(list => ({
-    ...list, enrolled: enrolled.has(list.id), mode: enrolled.get(list.id)?.mode ?? "named",
-    order: JSON.parse(enrolled.get(list.id)?.aisle_order ?? JSON.stringify(aisles)),
-    autoCleanup: !!enrolled.get(list.id)?.auto_cleanup,
+app.get("/api/lists", (_req, res) => {
+  const enrolled = db.prepare("SELECT * FROM lists").all() as Enrolled[];
+  const directory = new Map(localDirectory().map(list => [list.id, list]));
+  const lists = enrolled.map(list => ({
+    id: list.id, displayName: list.name, isShared: directory.get(list.id)?.isShared,
+    enrolled: true, mode: list.mode, order: JSON.parse(list.aisle_order), autoCleanup: !!list.auto_cleanup,
     lastRun: read("last:" + list.id), error: read("error:" + list.id),
-  })));
+  }));
+  res.json(lists);
+});
+app.get("/api/list-directory", (_req, res) => {
+  const enrolled = new Set((db.prepare("SELECT id FROM lists").all() as { id: string }[]).map(list => list.id));
+  const lists = localDirectory().filter(list => !enrolled.has(list.id)).map(list => ({
+    ...list, enrolled: false, mode: "named", order: aisles, autoCleanup: false,
+  }));
+  res.json({ lists, directoryReady: read(directoryKey) !== undefined, directoryError, syncing: !!directorySync, connected: !!read("username") });
+});
+app.post("/api/list-directory/refresh", (_req, res) => {
+  if (!msal || !read("username")) { res.sendStatus(409); return; }
+  void syncDirectory();
+  res.sendStatus(204);
 });
 app.put("/api/lists/:id", async (req, res) => {
   const { mode, order, autoCleanup } = req.body ?? {};
@@ -397,7 +435,8 @@ app.put("/api/lists/:id", async (req, res) => {
     res.status(400).json({ error: "Choose a prefix style and include each aisle once." });
     return;
   }
-  const list = (await getLists()).find(list => list.id === req.params.id);
+  const existing = enrolledList(req.params.id);
+  const list = existing ? { id: existing.id, displayName: existing.name } : localDirectory().find(list => list.id === req.params.id);
   if (!list) { res.sendStatus(404); return; }
   if (active.has(list.id)) { res.status(409).json({ error: "Wait for the current run to finish." }); return; }
   const autoCleanupValue = autoCleanup === undefined ? enrolledList(list.id)?.auto_cleanup ?? 0 : Number(autoCleanup);
@@ -419,11 +458,10 @@ app.post("/api/lists/:id/sync", async (req, res) => {
   await run(list, true);
   res.sendStatus(204);
 });
-app.get("/api/lists/:id/items", async (req, res) => {
-  const list = enrolledList(req.params.id);
-  if (!list) { res.sendStatus(404); return; }
-  const items = planList(list, await openTasks(list.id));
-  res.json(items.map(({ id, base, aisle }) => ({ id, name: base, aisle })));
+app.get("/api/lists/:id/items", (req, res) => {
+  if (!enrolledList(req.params.id)) { res.sendStatus(404); return; }
+  const snapshot = readSnapshot(req.params.id);
+  res.json({ items: snapshot?.items ?? [], syncedAt: snapshot?.syncedAt ?? null });
 });
 app.put("/api/lists/:id/items/:taskId/aisle", async (req, res) => {
   const { aisle, name } = req.body ?? {};
@@ -459,27 +497,63 @@ function detailFlags(task: Task) {
   if (task.hasAttachments) flags.push("Attachments");
   return flags;
 }
-app.get("/api/lists/:id/duplicates", async (req, res) => {
-  const list = enrolledList(req.params.id);
-  if (!list) { res.sendStatus(404); return; }
+type Check = { flags: string[]; modified?: string; expires: number };
+type DuplicateCopy = ReturnType<typeof previewCopy>;
+type Snapshot = {
+  syncedAt: string;
+  items: { id: string; name: string; aisle: string }[];
+  duplicates: { key: string; name: string; keep: DuplicateCopy; copies: DuplicateCopy[] }[];
+  checks: Record<string, Check>;
+};
+function readSnapshot(listId: string): Snapshot | undefined {
+  const stored = read("snapshot:" + listId);
+  return stored ? JSON.parse(stored) as Snapshot : undefined;
+}
+function previewCopy(task: Task, flags: string[] = []) {
+  return {
+    id: task.id, title: task.title, completed: task.status === "completed",
+    date: task.status === "completed" ? task.completedDateTime?.dateTime ?? task.createdDateTime : task.createdDateTime,
+    flags,
+  };
+}
+async function syncSnapshot(list: Enrolled, tasks?: Task[]) {
+  const client = msal;
+  const account = read("account");
   const path = taskPath(list.id);
-  const groups = duplicateGroups(planList(list, await collection<Task>(path)));
-  const checks = new Map<string, string[]>();
+  const planned = planList(list, tasks ?? await collection<Task>(path));
+  const groups = duplicateGroups(planned);
+  const previous = readSnapshot(list.id);
+  const checks = new Map<string, Check>();
   const copies = groups.flatMap(group => group.copies);
   for (let index = 0; index < copies.length; index += 5) {
     await Promise.all(copies.slice(index, index + 5).map(async task => {
-      checks.set(task.id, [...detailFlags(task), ...await checklistFlags(path + "/" + encodeURIComponent(task.id))]);
+      const cached = previous?.checks[task.id];
+      if (cached && cached.modified === task.lastModifiedDateTime && cached.expires > Date.now()) {
+        checks.set(task.id, cached);
+        return;
+      }
+      const flags = await checklistFlags(path + "/" + encodeURIComponent(task.id));
+      checks.set(task.id, { flags, modified: task.lastModifiedDateTime, expires: Date.now() + (flags.includes("Checklist could not be checked") ? 0 : 10 * 60_000) });
     }));
   }
-  function preview(task: Task & { base: string }) {
-    return {
-      id: task.id, title: task.title, completed: task.status === "completed",
-      date: task.status === "completed" ? task.completedDateTime?.dateTime ?? task.createdDateTime : task.createdDateTime,
-      flags: checks.get(task.id) ?? [],
-    };
-  }
-  res.json(groups.map(({ key, keep, copies }) => ({ key, name: keep.base, keep: preview(keep), copies: copies.map(preview) })));
+  if (client !== msal || account !== read("account")) return;
+  const snapshot: Snapshot = {
+    syncedAt: new Date().toISOString(),
+    items: planned.filter(task => task.status !== "completed").map(({ id, base, aisle }) => ({ id, name: base, aisle })),
+    duplicates: groups.map(({ key, keep, copies }) => ({
+      key, name: keep.base, keep: previewCopy(keep),
+      copies: copies.map(task => previewCopy(task, [...detailFlags(task), ...(checks.get(task.id)?.flags ?? [])])),
+    })),
+    checks: Object.fromEntries(checks),
+  };
+  write("snapshot:" + list.id, JSON.stringify(snapshot));
+}
+app.get("/api/lists/:id/duplicates", (req, res) => {
+  if (!enrolledList(req.params.id)) { res.sendStatus(404); return; }
+  const snapshot = readSnapshot(req.params.id);
+  res.json({ groups: snapshot?.duplicates ?? [], syncedAt: snapshot?.syncedAt ?? null });
 });
+
 type ProposedDuplicate = { id: string; keepId: string; key: string; completed: boolean; keepCompleted: boolean };
 
 async function removeDuplicates(list: Enrolled, proposed?: ProposedDuplicate[]) {
@@ -542,7 +616,9 @@ app.post("/api/lists/:id/duplicates/remove", async (req, res) => {
   }
   active.add(list.id);
   try {
-    res.json(await removeDuplicates(list, proposed as ProposedDuplicate[]));
+    const result = await removeDuplicates(list, proposed as ProposedDuplicate[]);
+    if (result.removed) await syncSnapshot(list).catch(() => undefined);
+    res.json(result);
   } finally {
     active.delete(list.id);
   }

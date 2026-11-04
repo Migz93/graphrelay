@@ -190,7 +190,8 @@ function Settings({ build }: { build: BuildInfo }) {
 type ListItem = { id: string; name: string; aisle: string };
 
 function ItemAisles({ path, aisles, refresh }: { path: string; aisles: string[]; refresh: () => Promise<void> }) {
-  const [items, setItems] = useState<ListItem[]>();
+  const [snapshot, setSnapshot] = useState<{ items: ListItem[]; syncedAt: string | null }>();
+  const items = snapshot?.items;
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
@@ -198,7 +199,7 @@ function ItemAisles({ path, aisles, refresh }: { path: string; aisles: string[];
     setBusy(true);
     setError("");
     try {
-      setItems(await api<ListItem[]>(path + "/items"));
+      setSnapshot(await api<{ items: ListItem[]; syncedAt: string | null }>(path + "/items"));
     } catch (error) {
       setError((error as Error).message);
     } finally {
@@ -221,6 +222,16 @@ function ItemAisles({ path, aisles, refresh }: { path: string; aisles: string[];
     }
   }
   useEffect(() => { void load(); }, [path]);
+  useEffect(() => {
+    if (busy) return;
+    let active = true;
+    const timer = window.setInterval(() => {
+      void api<NonNullable<typeof snapshot>>(path + "/items").then(value => {
+        if (active) setSnapshot(value);
+      }).catch(() => undefined);
+    }, 3000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [path, busy]);
   return <div className="grid gap-3 rounded-lg bg-background-container-low p-4">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <h2 className="font-medium">Open items</h2>
@@ -230,7 +241,9 @@ function ItemAisles({ path, aisles, refresh }: { path: string; aisles: string[];
     {error && <ErrorBanner message={error} />}
     {notice && <p role="status" className="text-sm text-success">{notice}</p>}
     {!items && busy && <p>Loading open items…</p>}
-    {items?.length === 0 && <p>No open items.</p>}
+    {snapshot?.syncedAt === null && <p>Waiting for the first Microsoft sync.</p>}
+    {snapshot?.syncedAt && <p className="text-xs text-on-surface-variant">Items synced {new Date(snapshot.syncedAt).toLocaleString()}</p>}
+    {snapshot?.syncedAt && items?.length === 0 && <p>No open items.</p>}
     {aisles.map(aisle => {
       const group = items?.filter(item => item.aisle === aisle);
       if (!group?.length) return null;
@@ -312,7 +325,8 @@ type DuplicateCopy = { id: string; title: string; completed: boolean; date?: str
 type DuplicateGroup = { key: string; name: string; keep: DuplicateCopy; copies: DuplicateCopy[] };
 
 function DuplicatePreview({ path, onRemoved }: { path: string; onRemoved: () => void }) {
-  const [groups, setGroups] = useState<DuplicateGroup[]>();
+  const [snapshot, setSnapshot] = useState<{ groups: DuplicateGroup[]; syncedAt: string | null }>();
+  const groups = snapshot?.groups;
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -340,9 +354,8 @@ function DuplicatePreview({ path, onRemoved }: { path: string; onRemoved: () => 
   async function load() {
     setBusy(true);
     setError("");
-    setGroups(undefined);
     try {
-      setGroups(await api<DuplicateGroup[]>(path + "/duplicates"));
+      setSnapshot(await api<{ groups: DuplicateGroup[]; syncedAt: string | null }>(path + "/duplicates"));
     } catch (error) {
       setError((error as Error).message);
     } finally {
@@ -365,8 +378,10 @@ function DuplicatePreview({ path, onRemoved }: { path: string; onRemoved: () => 
     {removing && <p role="status">Removing eligible duplicates…</p>}
     {result && <p role="status">{result}</p>}
     {error && <ErrorBanner message={error} />}
-    {busy && <p role="status">Checking open and completed items…</p>}
-    {groups?.length === 0 && <p>No duplicate names found.</p>}
+    {busy && <p role="status">Loading saved preview…</p>}
+    {snapshot?.syncedAt === null && <p>Waiting for the first Microsoft sync.</p>}
+    {snapshot?.syncedAt && <p className="text-xs text-on-surface-variant">Preview from {new Date(snapshot.syncedAt).toLocaleString()}</p>}
+    {snapshot?.syncedAt && groups?.length === 0 && <p>No duplicate names found.</p>}
     {groups?.map(group => <section key={group.key} className="grid gap-2 rounded-lg border border-outline-variant/30 p-3">
       <h3 className="font-headline font-semibold">{group.name} × {group.copies.length + 1}</h3>
       <ul className="divide-y divide-outline-variant/30 text-sm">
@@ -444,13 +459,40 @@ function ListDetail({ list, refresh }: { list: List; refresh: () => Promise<void
   </Page>;
 }
 
-function EnrollList({ lists, refresh }: { lists: List[]; refresh: () => Promise<void> }) {
+function EnrollList({ refresh }: { refresh: () => Promise<void> }) {
   const [selected, setSelected] = useState("");
-  const available = lists.filter(list => !list.enrolled);
+  const [directory, setDirectory] = useState<{ lists: List[]; directoryReady: boolean; directoryError: string; syncing: boolean; connected: boolean }>();
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let active = true;
+    const load = () => api<NonNullable<typeof directory>>("/list-directory").then(value => {
+      if (active) { setDirectory(value); setError(""); }
+    }).catch(error => { if (active) setError(error.message); });
+    void load();
+    const timer = window.setInterval(() => void load(), 3000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, []);
+  async function refreshDirectory() {
+    if (!directory) return;
+    setError("");
+    setDirectory({ ...directory, syncing: true });
+    try {
+      await api("/list-directory/refresh", "POST");
+    } catch (error) {
+      setDirectory({ ...directory, syncing: false });
+      setError((error as Error).message);
+    }
+  }
+  const available = directory?.lists ?? [];
   const list = available.find(list => list.id === selected);
   return <Page className="space-y-5">
     <Link to="/todo" className="text-sm text-on-surface-variant">← To Do</Link>
-    <PageHeader title="Enroll a list" />
+    <PageHeader title="Enroll a list">
+      {directory?.connected && <button className={secondaryButtonClass} disabled={directory.syncing} onClick={() => void refreshDirectory()}>{directory.syncing ? "Refreshing…" : "Refresh available lists"}</button>}
+    </PageHeader>
+    {(error || directory?.directoryError) && <ErrorBanner message={error || directory!.directoryError} />}
+    {directory && !directory.connected && <Link to="/settings">Connect Microsoft in Settings</Link>}
+    {directory?.connected && !directory.directoryReady && <p>Waiting for GraphRelay to sync available Microsoft lists.</p>}
     {available.length ? <SectionCard title="Choose a Microsoft To Do list">
       <label className="grid gap-2 text-sm">Microsoft To Do list
         <SelectInput value={selected} onChange={setSelected}>
@@ -458,7 +500,7 @@ function EnrollList({ lists, refresh }: { lists: List[]; refresh: () => Promise<
           {available.map(list => <option key={list.id} value={list.id}>{list.displayName}{list.isShared ? " (shared)" : ""}</option>)}
         </SelectInput>
       </label>
-    </SectionCard> : <p>All available lists are enrolled.</p>}
+    </SectionCard> : directory?.directoryReady && <p>All available lists are enrolled.</p>}
     {list && <ListSettings key={list.id} list={list} refresh={refresh} />}
   </Page>;
 }
@@ -508,7 +550,7 @@ function ToDo() {
           </ul> : <p>No lists enrolled yet.</p>}
         </SectionCard>
       </Page>} />
-      <Route path="enroll" element={<EnrollList lists={lists} refresh={refresh} />} />
+      <Route path="enroll" element={<EnrollList refresh={refresh} />} />
       <Route path=":listId" element={<EnrolledList lists={lists} refresh={refresh} />} />
       <Route path=":listId/settings" element={<EnrolledList lists={lists} refresh={refresh} settings />} />
     </Routes>
