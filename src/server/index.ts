@@ -5,7 +5,7 @@ import { ConfidentialClientApplication, CryptoProvider } from "@azure/msal-node"
 import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { aisles, planTitles, type Mode } from "./ordering.js";
+import { aisles, itemKey, planTitles, type Mode } from "./ordering.js";
 
 declare module "express-session" {
   interface SessionData {
@@ -41,6 +41,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS lists (id TEXT PRIMARY KEY, name TEXT, mode TEXT, aisle_order TEXT);
   CREATE TABLE IF NOT EXISTS titles (list_id TEXT, task_id TEXT, base TEXT, applied TEXT, PRIMARY KEY(list_id, task_id));
   CREATE TABLE IF NOT EXISTS pending_titles (list_id TEXT, task_id TEXT, base TEXT, applied TEXT, PRIMARY KEY(list_id, task_id));
+  CREATE TABLE IF NOT EXISTS aisle_corrections (list_id TEXT, item_key TEXT, aisle TEXT NOT NULL, PRIMARY KEY(list_id, item_key));
   CREATE TABLE IF NOT EXISTS activity (id INTEGER PRIMARY KEY, list_id TEXT, created TEXT DEFAULT CURRENT_TIMESTAMP, message TEXT);
 `);
 function read(key: string) {
@@ -129,25 +130,37 @@ function log(listId: string, message: string) {
   db.prepare("INSERT INTO activity (list_id, message) VALUES (?, ?)").run(listId, message);
   db.prepare("DELETE FROM activity WHERE list_id = ? AND id NOT IN (SELECT id FROM activity WHERE list_id = ? ORDER BY id DESC LIMIT 200)").run(listId, listId);
 }
+function taskPath(listId: string) {
+  return "me/todo/lists/" + encodeURIComponent(listId) + "/tasks";
+}
+async function openTasks(listId: string) {
+  return (await collection<Task>(taskPath(listId))).filter(task => task.status !== "completed");
+}
+function planList(list: Enrolled, tasks: Task[], recoverTitles = false) {
+  const stored = db.prepare("SELECT task_id, base, applied FROM titles WHERE list_id = ?").all(list.id) as { task_id: string; base: string; applied: string }[];
+  const originals = Object.fromEntries(stored.map(row => [row.task_id, row]));
+  const pending = db.prepare("SELECT task_id, base, applied FROM pending_titles WHERE list_id = ?").all(list.id) as typeof stored;
+  const recover = new Map(pending.map(row => [row.task_id, row]));
+  for (const task of tasks) {
+    const interrupted = recover.get(task.id);
+    if (interrupted?.applied !== task.title) continue;
+    originals[task.id] = interrupted;
+    if (!recoverTitles) continue;
+    db.prepare("INSERT OR REPLACE INTO titles VALUES (?, ?, ?, ?)").run(list.id, task.id, interrupted.base, interrupted.applied);
+    db.prepare("DELETE FROM pending_titles WHERE list_id = ? AND task_id = ?").run(list.id, task.id);
+  }
+  const rows = db.prepare("SELECT item_key, aisle FROM aisle_corrections WHERE list_id = ?").all(list.id) as { item_key: string; aisle: string }[];
+  const corrections = new Map(rows.map(row => [row.item_key, row.aisle]));
+  return planTitles(tasks, list.mode, JSON.parse(list.aisle_order), originals, corrections);
+}
 async function run(list: Enrolled) {
   if (active.has(list.id)) return;
   active.add(list.id);
   try {
-    const path = "me/todo/lists/" + encodeURIComponent(list.id) + "/tasks";
-    const tasks = (await collection<Task>(path)).filter(task => task.status !== "completed");
-    const stored = db.prepare("SELECT task_id, base, applied FROM titles WHERE list_id = ?").all(list.id) as { task_id: string; base: string; applied: string }[];
-    const originals = Object.fromEntries(stored.map(row => [row.task_id, row]));
-    const pending = db.prepare("SELECT task_id, base, applied FROM pending_titles WHERE list_id = ?").all(list.id) as typeof stored;
-    const recover = new Map(pending.map(row => [row.task_id, row]));
-    for (const task of tasks) {
-      const interrupted = recover.get(task.id);
-      if (interrupted?.applied !== task.title) continue;
-      originals[task.id] = interrupted;
-      db.prepare("INSERT OR REPLACE INTO titles VALUES (?, ?, ?, ?)").run(list.id, task.id, interrupted.base, interrupted.applied);
-      db.prepare("DELETE FROM pending_titles WHERE list_id = ? AND task_id = ?").run(list.id, task.id);
-    }
+    const path = taskPath(list.id);
+    const tasks = await openTasks(list.id);
     let changed = 0;
-    for (const task of planTitles(tasks, list.mode, JSON.parse(list.aisle_order), originals)) {
+    for (const task of planList(list, tasks, true)) {
       if (task.title === task.next) continue;
       const taskPath = path + "/" + encodeURIComponent(task.id);
       const current = await graph<Task>(taskPath);
@@ -336,6 +349,35 @@ app.put("/api/lists/:id", async (req, res) => {
   db.prepare("INSERT OR REPLACE INTO lists VALUES (?, ?, ?, ?)").run(list.id, list.displayName, mode, JSON.stringify(order));
   await run({ id: list.id, name: list.displayName, mode, aisle_order: JSON.stringify(order) });
   res.sendStatus(204);
+});
+function enrolledList(id: string) {
+  return db.prepare("SELECT * FROM lists WHERE id = ?").get(id) as Enrolled | undefined;
+}
+app.get("/api/lists/:id/items", async (req, res) => {
+  const list = enrolledList(req.params.id);
+  if (!list) { res.sendStatus(404); return; }
+  const items = planList(list, await openTasks(list.id));
+  res.json(items.map(({ id, base, aisle }) => ({ id, name: base, aisle })));
+});
+app.put("/api/lists/:id/items/:taskId/aisle", async (req, res) => {
+  const { aisle, name } = req.body ?? {};
+  if (!aisles.includes(aisle) || typeof name !== "string" || !itemKey(name)) {
+    res.status(400).json({ error: "Choose a valid item and aisle." });
+    return;
+  }
+  const list = enrolledList(req.params.id);
+  if (!list) { res.sendStatus(404); return; }
+  const path = taskPath(list.id) + "/" + encodeURIComponent(req.params.taskId);
+  const task = await graph<Task>(path);
+  const currentList = enrolledList(list.id)!;
+  const [item] = planList(currentList, [task]);
+  if (task.status === "completed" || itemKey(item.base) !== itemKey(name)) {
+    res.status(409).json({ error: "This item changed in Microsoft To Do. Refresh the items and try again." });
+    return;
+  }
+  db.prepare("INSERT OR REPLACE INTO aisle_corrections VALUES (?, ?, ?)").run(list.id, itemKey(item.base), aisle);
+  const applied = !active.has(list.id) && await run(currentList).then(() => true, () => false);
+  res.json({ applied });
 });
 app.get("/api/lists/:id/activity", (req, res) => {
   res.json(db.prepare("SELECT created, message FROM activity WHERE list_id = ? ORDER BY id DESC LIMIT 100").all(req.params.id));

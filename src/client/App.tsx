@@ -131,10 +131,64 @@ function Settings() {
   </Page>;
 }
 
+type ListItem = { id: string; name: string; aisle: string };
+
+function ItemAisles({ path, aisles, refresh }: { path: string; aisles: string[]; refresh: () => Promise<void> }) {
+  const [items, setItems] = useState<ListItem[]>();
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function load() {
+    setBusy(true);
+    setError("");
+    try {
+      setItems(await api<ListItem[]>(path + "/items"));
+    } catch (error) {
+      setError((error as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function change(item: ListItem, aisle: string) {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await api<{ applied: boolean }>(path + "/items/" + encodeURIComponent(item.id) + "/aisle", "PUT", { name: item.name, aisle });
+      setNotice(result.applied ? "Aisle saved for future additions." : "Aisle saved. GraphRelay will apply it on a later run.");
+      await load();
+      await refresh();
+    } catch (error) {
+      setError((error as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  useEffect(() => { void load(); }, [path]);
+  return <div className="grid gap-3 rounded-lg bg-background-container-low p-4">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <h3 className="font-medium">Item aisles</h3>
+      <button className={secondaryButtonClass} disabled={busy} onClick={() => void load()}>Refresh items</button>
+    </div>
+    <p className="text-sm text-on-surface-variant">Changes are saved for items with the same name on this list.</p>
+    {error && <ErrorBanner message={error} />}
+    {notice && <p role="status" className="text-sm text-success">{notice}</p>}
+    {!items && busy && <p>Loading open items…</p>}
+    {items?.length === 0 && <p>No open items.</p>}
+    {items?.map(item => <label key={item.id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
+      <span className="break-all">{item.name}</span>
+      <SelectInput aria-label={"Aisle for " + item.name} value={item.aisle} onChange={aisle => void change(item, aisle)} disabled={busy}>
+        {aisles.map(aisle => <option key={aisle} value={aisle}>{aisle}</option>)}
+      </SelectInput>
+    </label>)}
+  </div>;
+}
+
 function ListCard({ list, refresh }: { list: List; refresh: () => Promise<void> }) {
   const [mode, setMode] = useState(list.mode);
   const [order, setOrder] = useState(list.order);
   const [history, setHistory] = useState<Activity[]>();
+  const [showItems, setShowItems] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const path = "/lists/" + encodeURIComponent(list.id);
@@ -185,9 +239,11 @@ function ListCard({ list, refresh }: { list: List; refresh: () => Promise<void> 
     </ol>}
     <div className="flex flex-wrap items-center gap-3">
       <button className={primaryButtonClass} disabled={busy} onClick={() => void save()}>{list.enrolled ? "Save and run" : "Enroll and run"}</button>
+      {list.enrolled && <button className={secondaryButtonClass} aria-expanded={showItems} onClick={() => setShowItems(!showItems)}>{showItems ? "Hide item aisles" : "Edit item aisles"}</button>}
       {list.enrolled && <button className={secondaryButtonClass} aria-expanded={!!history} onClick={() => void activity()}>{history ? "Hide activity" : "View activity"}</button>}
       <span className="text-sm text-on-surface-variant">{list.lastRun ? "Last run · " + new Date(list.lastRun).toLocaleString() : "No runs yet"}</span>
     </div>
+    {showItems && <ItemAisles path={path} aisles={list.order} refresh={refresh} />}
     {history && <ul className="grid gap-2 text-sm">
       {history.length ? history.map((item, index) => <li key={index}><time className="mr-2 text-on-surface-variant">{item.created} UTC</time>{item.message}</li>) : <li>No title changes yet.</li>}
     </ul>}

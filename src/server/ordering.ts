@@ -9,13 +9,17 @@ const groceries: Record<string, string> = {
   bread: "Bakery", rolls: "Bakery", pasta: "Pantry", rice: "Pantry",
 };
 
-export function planTitles(tasks: { id: string; title: string }[], mode: Mode, order: string[], originals: Record<string, { base: string; applied: string }>) {
+export function itemKey(name: string) {
+  return name.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+export function planTitles(tasks: { id: string; title: string }[], mode: Mode, order: string[], originals: Record<string, { base: string; applied: string }>, corrections: ReadonlyMap<string, string> = new Map()) {
   const items = tasks.map(task => {
     const previous = originals[task.id];
     const prefix = previous?.applied.slice(0, previous.applied.length - previous.base.length);
     const base = prefix && task.title.startsWith(prefix) ? task.title.slice(prefix.length) : task.title;
-    const lookup = base.trim().toLowerCase();
-    const aisle = Object.hasOwn(groceries, lookup) ? groceries[lookup] : "Other";
+    const lookup = itemKey(base);
+    const aisle = corrections.get(lookup) ?? (Object.hasOwn(groceries, lookup) ? groceries[lookup] : "Other");
     return { ...task, base, aisle, rank: order.indexOf(aisle) };
   });
   items.sort((a, b) => a.rank - b.rank || a.base.localeCompare(b.base) || a.id.localeCompare(b.id));

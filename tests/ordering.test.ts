@@ -21,3 +21,15 @@ test("editing an item in To Do preserves the edit without stacking prefixes", ()
   deepEqual(planTitles(tasks, "named", aisles, originals).map(task => task.next), ["03 Frozen · Pizza"]);
   deepEqual(planTitles(tasks, "off", aisles, originals).map(task => task.next), ["Pizza"]);
 });
+
+test("list corrections take precedence for renamed tasks and later additions", () => {
+  const tasks = [
+    { id: "1", title: "03 Frozen · Peas" },
+    { id: "2", title: "PEAS " },
+    { id: "3", title: "Garden   peas" },
+  ];
+  const originals = { "1": { base: "Peas", applied: "03 Frozen · Peas" } };
+  const corrections = new Map([["peas", "Produce"], ["garden peas", "Produce"]]);
+  deepEqual(planTitles(tasks, "named", aisles, originals, corrections).map(task => task.aisle), ["Produce", "Produce", "Produce"]);
+  deepEqual(planTitles(tasks, "named", aisles, originals).map(task => task.aisle), ["Frozen", "Frozen", "Other"]);
+});
