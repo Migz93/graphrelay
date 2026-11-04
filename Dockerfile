@@ -7,10 +7,11 @@ COPY . .
 RUN npm run build && npm prune --omit=dev
 
 FROM node:22-bookworm-slim
-ARG COMMIT_SHA=unknown
+ARG COMMIT_SHA=local
+ARG BUILD_CHANNEL=custom
 LABEL org.opencontainers.image.revision=$COMMIT_SHA
 WORKDIR /app
-ENV NODE_ENV=production PORT=9304 DATA_DIR=/config
+ENV NODE_ENV=production PORT=9304 DATA_DIR=/config COMMIT_SHA=$COMMIT_SHA BUILD_CHANNEL=$BUILD_CHANNEL
 COPY --from=build /app/package.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist

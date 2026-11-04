@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import Layout from "./components/Layout";
+import Layout, { type BuildInfo } from "./components/Layout";
 import { ErrorBanner, Page, PageHeader, PageLoading } from "./components/Page";
 import { dangerButtonClass, SectionCard, SelectInput, SettingRow, SettingToggle, TextInput, primaryButtonClass, secondaryButtonClass } from "./components/FormControls";
 
@@ -17,7 +17,7 @@ async function api<T>(path: string, method = "GET", body?: object): Promise<T> {
   return response.status === 204 ? undefined as T : await response.json() as T;
 }
 
-type Session = { configured: boolean; signedIn: boolean };
+type Session = { configured: boolean } & ({ signedIn: false } | { signedIn: true; build: BuildInfo });
 type Connection = { account: string | null; redirectUri: string; clientId: string | null; editable: boolean };
 type List = {
   id: string; displayName: string; isShared: boolean; isOwner: boolean;
@@ -97,7 +97,7 @@ function PollingSettings() {
   </SectionCard>;
 }
 
-function Settings() {
+function MicrosoftSettings() {
   const [connection, setConnection] = useState<Connection>();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -169,6 +169,21 @@ function Settings() {
       </>}
     </SectionCard>
     <PollingSettings />
+  </Page>;
+}
+
+function Settings({ build }: { build: BuildInfo }) {
+  const [params] = useSearchParams();
+  if (params.get("tab") !== "about") return <MicrosoftSettings />;
+  return <Page className="space-y-5">
+    <PageHeader title="About GraphRelay"><Link className={secondaryButtonClass} to="/settings">Back to Settings</Link></PageHeader>
+    <SectionCard title="Build information">
+      <dl className="grid gap-3 text-sm">
+        <div><dt className="text-on-surface-variant">Version</dt><dd>v{build.version}</dd></div>
+        <div><dt className="text-on-surface-variant">Channel</dt><dd className="capitalize">{build.channel}</dd></div>
+        <div><dt className="text-on-surface-variant">Revision</dt><dd className="break-all font-mono">{build.revision}</dd></div>
+      </dl>
+    </SectionCard>
   </Page>;
 }
 
@@ -509,12 +524,12 @@ export default function App() {
   if (!session) return <PageLoading label="Loading GraphRelay…" />;
   if (!session.configured) return <Login firstRun onLogin={refresh} />;
   if (!session.signedIn) return <Login onLogin={refresh} />;
-  return <Layout user={{ username: "Administrator", displayName: "Administrator" }} onLogout={() => void api("/logout", "POST").then(refresh).catch(error => setError(error.message))}>
+  return <Layout build={session.build} user={{ username: "Administrator", displayName: "Administrator" }} onLogout={() => void api("/logout", "POST").then(refresh).catch(error => setError(error.message))}>
     <Routes>
       <Route path="/dashboard" element={<Page><PageHeader title="Dashboard" /><SectionCard title="Microsoft account companion" description="Manage Microsoft To Do lists and calendar subscriptions."><Link className={primaryButtonClass} to="/settings">Microsoft connection</Link></SectionCard></Page>} />
       <Route path="/todo/*" element={<ToDo />} />
       <Route path="/calendar" element={<Page><PageHeader title="Calendar Feeds" /><SectionCard title="Calendar feeds" description="The ms-ical integration is planned for a later milestone." /></Page>} />
-      <Route path="/settings" element={<Settings />} />
+      <Route path="/settings" element={<Settings build={session.build} />} />
       <Route path="*" element={<Navigate replace to="/dashboard" />} />
     </Routes>
   </Layout>;

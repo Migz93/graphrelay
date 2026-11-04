@@ -240,7 +240,12 @@ app.use(session({
 }));
 app.get("/api/health", (_req, res) => { res.json({ ok: true }); });
 app.use("/api", (_req, res, next) => { res.set("Cache-Control", "no-store"); next(); });
-app.get("/api/session", (req, res) => { res.json({ configured: adminConfigured(), signedIn: !!req.session.admin }); });
+const build = {
+  version: (JSON.parse(readFileSync(resolve("package.json"), "utf8")) as { version: string }).version,
+  channel: env.BUILD_CHANNEL ?? "custom",
+  revision: env.COMMIT_SHA ?? "local",
+};
+app.get("/api/session", (req, res) => { res.json({ configured: adminConfigured(), signedIn: !!req.session.admin, ...(req.session.admin ? { build } : {}) }); });
 app.use("/api", (req, res, next) => {
   if (req.method !== "GET" && req.get("X-GraphRelay") !== "1") {
     res.sendStatus(403);

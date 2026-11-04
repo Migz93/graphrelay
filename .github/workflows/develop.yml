@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker build --build-arg COMMIT_SHA="$GITHUB_SHA" -t ghcr.io/migz93/graphrelay:develop .
+      - run: docker build --build-arg BUILD_CHANNEL=develop --build-arg COMMIT_SHA="$GITHUB_SHA" -t ghcr.io/migz93/graphrelay:develop .
       - env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

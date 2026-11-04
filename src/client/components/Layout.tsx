@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { NavLink } from "react-router-dom";
-import { CalendarDays, LayoutDashboard, ListChecks, LogOut, Menu, Settings } from "lucide-react";
+import { Link, NavLink } from "react-router-dom";
+import { Beaker, CalendarDays, Code2, LayoutDashboard, ListChecks, LogOut, Menu, Server, Settings } from "lucide-react";
 import { useDialogA11y } from "../hooks/useDialogA11y";
 
 type SessionUser = { username: string; displayName: string; email?: string };
+
+export type BuildInfo = { version: string; channel: string; revision: string };
 
 const nav = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -12,7 +14,7 @@ const nav = [
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 
-export default function Layout({ user, onLogout, children }: { user: SessionUser | null; onLogout: () => void; children: React.ReactNode }) {
+export default function Layout({ user, onLogout, build, children }: { build: BuildInfo; user: SessionUser | null; onLogout: () => void; children: React.ReactNode }) {
   const [accountOpen, setAccountOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
@@ -68,10 +70,10 @@ export default function Layout({ user, onLogout, children }: { user: SessionUser
           <div className="grid size-8 shrink-0 place-items-center"><img className="block size-8" src="/graphrelay-logo.svg" alt="GraphRelay" /></div>
           <div className="min-w-0">
             <div className="font-headline text-sm font-bold leading-[1.1]">GraphRelay</div>
-            <div className="mt-0.5 text-xs leading-tight text-on-surface-variant">Microsoft account companion</div>
+            <div className="mt-0.5 truncate text-xs leading-tight text-on-surface-variant">Microsoft 365 tools</div>
           </div>
         </div>
-        <nav className="grid flex-1 content-start gap-0.5 overflow-y-auto px-3 py-4">
+        <nav aria-label="Main navigation" className="grid flex-1 content-start gap-0.5 overflow-y-auto px-3 py-4">
           {nav.map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
@@ -101,9 +103,8 @@ export default function Layout({ user, onLogout, children }: { user: SessionUser
             </button>
           </>}
         </div>
+        <VersionFooter build={build} onNavigate={() => setMobileOpen(false)} />
       </aside>
-      {/* Keep wide content from expanding the mobile layout. */}
-
       <div className="min-w-0 flex-1 md:ml-64">
         <div className="flex items-center gap-3 border-b border-outline-variant/30 bg-background-container-low px-4 py-3 md:hidden">
           <button type="button" className="rounded-lg p-1.5 text-on-surface-variant hover:bg-background-container-high hover:text-on-surface" onClick={() => setMobileOpen((open) => !open)} aria-label="Toggle navigation" aria-expanded={mobileOpen} aria-controls="mobile-sidebar">
@@ -116,4 +117,17 @@ export default function Layout({ user, onLogout, children }: { user: SessionUser
       </div>
     </div>
   );
+}
+
+function VersionFooter({ build, onNavigate }: { build: BuildInfo; onNavigate: () => void }) {
+  const stable = build.channel === "stable";
+  const develop = build.channel === "develop";
+  const Icon = stable ? Server : develop ? Beaker : Code2;
+  const label = stable ? "GraphRelay Stable" : develop ? "GraphRelay Develop" : "Custom Build";
+  return <div className="px-3 pb-3">
+    <Link className="group flex items-center gap-3 rounded-lg px-3 py-2.5 text-on-surface no-underline hover:bg-background-container-high" to="/settings?tab=about" onClick={onNavigate}>
+      <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-background-bright text-on-surface-variant group-hover:text-on-surface"><Icon size={16} strokeWidth={1.75} /></span>
+      <span><strong className="block text-xs font-semibold leading-tight">{label}</strong><small className="mt-0.5 block font-mono text-xs leading-tight text-on-surface-variant">{stable ? "v" + build.version : build.revision.slice(0, 7)}</small></span>
+    </Link>
+  </div>;
 }
