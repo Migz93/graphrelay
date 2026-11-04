@@ -6,4 +6,4 @@ GraphRelay runs on Node.js, TypeScript, Express, SQLite, React, Vite and Tailwin
 
 Use the private workspace runbook for direct SSH development. Edit the server checkout in the dedicated GraphRelay devcontainer at /workspaces/graphrelay. Install dependencies and run checks inside that container. Use a task branch from develop and synchronize through GitHub. Run npm run check, npm test and npm run build before review. Read docs/workflow.md for review and release gates.
 
-Keep credentials, token cache data, internal host details and live list contents out of Git and logs. Build a uniquely tagged candidate and smoke-test it with disposable data. Deploy the exact tested image only when requested.
+Keep credentials, token cache data, internal host details and live list contents out of Git and logs. Build a uniquely tagged candidate and smoke-test it with disposable data. As part of each implementation that changes the running app, deploy the exact candidate after checks and disposable smoke testing pass. Miguel authorized this for GraphRelay's existing GDLXGS test container. Preserve its /config mount and verify health after replacement.
