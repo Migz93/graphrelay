@@ -45,7 +45,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS aisle_corrections (list_id TEXT, item_key TEXT, aisle TEXT NOT NULL, PRIMARY KEY(list_id, item_key));
   CREATE TABLE IF NOT EXISTS activity (id INTEGER PRIMARY KEY, list_id TEXT, created TEXT DEFAULT CURRENT_TIMESTAMP, message TEXT);
 `);
-if (!db.pragma("table_info(lists)").some(column => (column as { name: string }).name === "auto_cleanup")) {
+if (!(db.pragma("table_info(lists)") as { name: string }[]).some(column => column.name === "auto_cleanup")) {
   db.exec("ALTER TABLE lists ADD COLUMN auto_cleanup INTEGER NOT NULL DEFAULT 0");
 }
 function read(key: string) {
