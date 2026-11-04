@@ -250,7 +250,50 @@ function ListSettings({ list, refresh }: { list: List; refresh: () => Promise<vo
   </SectionCard>;
 }
 
+type DuplicateCopy = { id: string; title: string; completed: boolean; date?: string; flags: string[] };
+type DuplicateGroup = { key: string; name: string; keep: DuplicateCopy; copies: DuplicateCopy[] };
+
+function DuplicatePreview({ path }: { path: string }) {
+  const [groups, setGroups] = useState<DuplicateGroup[]>();
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function load() {
+    setBusy(true);
+    setError("");
+    setGroups(undefined);
+    try {
+      setGroups(await api<DuplicateGroup[]>(path + "/duplicates"));
+    } catch (error) {
+      setError((error as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  useEffect(() => { void load(); }, [path]);
+  return <SectionCard title="Duplicate preview" description="GraphRelay keeps an open copy when possible. This preview makes no changes to Microsoft To Do.">
+    <div><button className={secondaryButtonClass} disabled={busy} onClick={() => void load()}>Refresh preview</button></div>
+    {error && <ErrorBanner message={error} />}
+    {busy && <p role="status">Checking open and completed items…</p>}
+    {groups?.length === 0 && <p>No duplicate names found.</p>}
+    {groups?.map(group => <section key={group.key} className="grid gap-2 rounded-lg border border-outline-variant/30 p-3">
+      <h3 className="font-headline font-semibold">{group.name} × {group.copies.length + 1}</h3>
+      <ul className="divide-y divide-outline-variant/30 text-sm">
+        {[group.keep, ...group.copies].map(copy => <li key={copy.id} className="grid gap-1 py-2">
+          <span className="break-words">{copy.title}</span>
+          <span className="text-on-surface-variant">
+            {copy.id === group.keep.id ? "Keep" : copy.flags.length ? "Review before removing" : "Proposed removal"}
+            {" · "}{copy.completed ? "Completed" : "Open"}
+            {copy.date && " · " + new Date(/(?:Z|[+-]\d{2}:\d{2})$/i.test(copy.date) ? copy.date : copy.date + "Z").toLocaleString()}
+          </span>
+          {!!copy.flags.length && <span className="text-warning">{copy.flags.join(" · ")}</span>}
+        </li>)}
+      </ul>
+    </section>)}
+  </SectionCard>;
+}
+
 function ListDetail({ list, refresh }: { list: List; refresh: () => Promise<void> }) {
+  const [showDuplicates, setShowDuplicates] = useState(false);
   const [history, setHistory] = useState<Activity[]>();
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [error, setError] = useState("");
@@ -271,6 +314,7 @@ function ListDetail({ list, refresh }: { list: List; refresh: () => Promise<void
     <Link to="/todo" className="text-sm text-on-surface-variant">← To Do</Link>
     <PageHeader title={list.displayName}>
       <Link className={secondaryButtonClass} to={listUrl(list.id) + "/settings"}>List settings</Link>
+      <button className={secondaryButtonClass} aria-expanded={showDuplicates} onClick={() => setShowDuplicates(!showDuplicates)}>{showDuplicates ? "Hide duplicates" : "Preview duplicates"}</button>
       <button className={secondaryButtonClass} disabled={loadingHistory} aria-expanded={!!history} onClick={() => void activity()}>{history ? "Hide activity" : "View activity"}</button>
     </PageHeader>
     <p className="text-sm text-on-surface-variant">{runStatus(list)}</p>
@@ -280,6 +324,7 @@ function ListDetail({ list, refresh }: { list: List; refresh: () => Promise<void
         {history.length ? history.map((item, index) => <li key={index}><time className="mr-2 text-on-surface-variant">{item.created} UTC</time>{item.message}</li>) : <li>No title changes yet.</li>}
       </ul>
     </SectionCard>}
+    {showDuplicates && <DuplicatePreview path={path} />}
     <ItemAisles path={path} aisles={list.order} refresh={refresh} />
   </Page>;
 }

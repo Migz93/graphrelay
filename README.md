@@ -14,7 +14,7 @@ GraphRelay encrypts the Microsoft configuration and token cache with a key store
 
 Create a disposable list in Microsoft To Do, share it with the other shopper, and set it to Alphabetical on each phone. Enroll that list in GraphRelay and select named or number-only prefixes. Try adding Peas from both phones. GraphRelay checks enrolled lists every 90 seconds and shows title changes under View activity.
 
-The grocery dictionary is small. Unrecognized items fall into Other. Open an enrolled list from **To Do** to see its open items grouped by aisle. Pick an aisle next to an item to correct it. Use **List settings** to change prefix style and aisle order. GraphRelay remembers the choice for matching names on that list, ignoring case and extra spaces. Only open items are renamed. Turning prefixes off restores open titles that still carry the prefix applied by GraphRelay. Duplicate deletion and the ms-ical port are future work.
+The grocery dictionary is small. Unrecognized items fall into Other. Open an enrolled list from **To Do** to see its open items grouped by aisle. Pick an aisle next to an item to correct it. Use **List settings** to change prefix style and aisle order. GraphRelay remembers the choice for matching names on that list, ignoring case and extra spaces. Only open items are renamed. Turning prefixes off restores open titles that still carry the prefix applied by GraphRelay. Use **Preview duplicates** on an enrolled list to review open and completed copies. The preview prefers an open copy and flags copies with notes, attachments or checklist steps. Duplicate deletion and the ms-ical port are future work.
 
 ## Development
 

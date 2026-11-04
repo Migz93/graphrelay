@@ -5,6 +5,7 @@ import { ConfidentialClientApplication, CryptoProvider } from "@azure/msal-node"
 import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { duplicateGroups } from "./duplicates.js";
 import { aisles, itemKey, planTitles, type Mode } from "./ordering.js";
 
 declare module "express-session" {
@@ -123,7 +124,15 @@ async function collection<T>(path: string) {
 }
 type GraphList = { id: string; displayName: string; isShared: boolean; isOwner: boolean };
 type Enrolled = { id: string; name: string; mode: Mode; aisle_order: string };
-type Task = { id: string; title: string; status: string };
+type Task = {
+  id: string;
+  title: string;
+  status: string;
+  createdDateTime?: string;
+  completedDateTime?: { dateTime: string };
+  body?: { content?: string };
+  hasAttachments?: boolean;
+};
 const getLists = () => collection<GraphList>("me/todo/lists");
 const active = new Set<string>();
 function log(listId: string, message: string) {
@@ -378,6 +387,36 @@ app.put("/api/lists/:id/items/:taskId/aisle", async (req, res) => {
   db.prepare("INSERT OR REPLACE INTO aisle_corrections VALUES (?, ?, ?)").run(list.id, itemKey(item.base), aisle);
   const applied = !active.has(list.id) && await run(currentList).then(() => true, () => false);
   res.json({ applied });
+});
+app.get("/api/lists/:id/duplicates", async (req, res) => {
+  const list = enrolledList(req.params.id);
+  if (!list) { res.sendStatus(404); return; }
+  const path = taskPath(list.id);
+  const groups = duplicateGroups(planList(list, await collection<Task>(path)));
+  const checks = new Map<string, string[]>();
+  const copies = groups.flatMap(group => group.copies);
+  for (let index = 0; index < copies.length; index += 5) {
+    await Promise.all(copies.slice(index, index + 5).map(async task => {
+      const flags: string[] = [];
+      if (task.body?.content?.trim()) flags.push("Notes");
+      if (task.hasAttachments) flags.push("Attachments");
+      try {
+        const steps = await graph<{ value: unknown[] }>(path + "/" + encodeURIComponent(task.id) + "/checklistItems");
+        if (steps.value.length) flags.push("Checklist steps");
+      } catch {
+        flags.push("Checklist could not be checked");
+      }
+      checks.set(task.id, flags);
+    }));
+  }
+  function preview(task: Task & { base: string }) {
+    return {
+      id: task.id, title: task.title, completed: task.status === "completed",
+      date: task.status === "completed" ? task.completedDateTime?.dateTime ?? task.createdDateTime : task.createdDateTime,
+      flags: checks.get(task.id) ?? [],
+    };
+  }
+  res.json(groups.map(({ key, keep, copies }) => ({ key, name: keep.base, keep: preview(keep), copies: copies.map(preview) })));
 });
 app.get("/api/lists/:id/activity", (req, res) => {
   res.json(db.prepare("SELECT created, message FROM activity WHERE list_id = ? ORDER BY id DESC LIMIT 100").all(req.params.id));

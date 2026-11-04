@@ -13,7 +13,7 @@ export function itemKey(name: string) {
   return name.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-export function planTitles(tasks: { id: string; title: string }[], mode: Mode, order: string[], originals: Record<string, { base: string; applied: string }>, corrections: ReadonlyMap<string, string> = new Map()) {
+export function planTitles<T extends { id: string; title: string }>(tasks: T[], mode: Mode, order: string[], originals: Record<string, { base: string; applied: string }>, corrections: ReadonlyMap<string, string> = new Map()) {
   const items = tasks.map(task => {
     const previous = originals[task.id];
     const prefix = previous?.applied.slice(0, previous.applied.length - previous.base.length);
