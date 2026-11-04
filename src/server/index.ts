@@ -165,7 +165,7 @@ function planList(list: Enrolled, tasks: Task[], recoverTitles = false) {
   const corrections = new Map(rows.map(row => [row.item_key, row.aisle]));
   return planTitles(tasks, list.mode, JSON.parse(list.aisle_order), originals, corrections);
 }
-async function run(list: Enrolled, scheduled = false) {
+async function run(list: Enrolled, includeCleanup = false) {
   if (active.has(list.id)) return;
   active.add(list.id);
   try {
@@ -188,7 +188,7 @@ async function run(list: Enrolled, scheduled = false) {
       log(list.id, task.title + " → " + task.next);
       changed++;
     }
-    if (scheduled && list.auto_cleanup) {
+    if (includeCleanup && list.auto_cleanup) {
       const cleanup = await removeDuplicates(list);
       if (cleanup.failed) throw new Error("Run failed. Automatic duplicate cleanup could not remove " + cleanup.failed + " copies.");
     }
@@ -204,19 +204,31 @@ async function run(list: Enrolled, scheduled = false) {
     active.delete(list.id);
   }
 }
+const pollingOptions = [1, 2, 5, 10, 30, 60];
+const pollingKey = "polling-minutes";
+function pollingMinutes() {
+  return Number(read(pollingKey) ?? 1);
+}
 let sweeping = false;
-setInterval(async () => {
-  if (!msal || !read("account") || sweeping) return;
+let pollTimer: NodeJS.Timeout | undefined;
+function schedulePoll() {
+  clearTimeout(pollTimer);
+  if (!sweeping) pollTimer = setTimeout(pollLists, pollingMinutes() * 60_000).unref();
+}
+async function pollLists() {
   sweeping = true;
   try {
+    if (!msal || !read("account")) return;
     for (const { id } of db.prepare("SELECT id FROM lists").all() as { id: string }[]) {
       const list = enrolledList(id);
       if (list && (list.mode !== "off" || list.auto_cleanup || read("error:" + id))) await run(list, true).catch(() => undefined);
     }
   } finally {
     sweeping = false;
+    schedulePoll();
   }
-}, 90_000).unref();
+}
+schedulePoll();
 
 if (env.TRUST_PROXY === "1") app.set("trust proxy", 1);
 app.use(express.json({ limit: "16kb" }));
@@ -345,6 +357,21 @@ app.get("/api/microsoft/callback", async (req, res) => {
     res.redirect("/settings?connection=failed&reason=" + reason);
   }
 });
+app.get("/api/polling", (_req, res) => {
+  res.json({ minutes: pollingMinutes(), options: pollingOptions });
+});
+app.put("/api/polling", (req, res) => {
+  const { minutes } = req.body ?? {};
+  if (!pollingOptions.includes(minutes)) {
+    res.status(400).json({ error: "Choose a supported polling interval." });
+    return;
+  }
+  if (minutes !== pollingMinutes()) {
+    write(pollingKey, String(minutes));
+    schedulePoll();
+  }
+  res.sendStatus(204);
+});
 app.get("/api/lists", async (_req, res) => {
   const lists = await getLists();
   const enrolled = new Map((db.prepare("SELECT * FROM lists").all() as Enrolled[]).map(list => [list.id, list]));
@@ -377,6 +404,16 @@ app.put("/api/lists/:id", async (req, res) => {
 function enrolledList(id: string) {
   return db.prepare("SELECT * FROM lists WHERE id = ?").get(id) as Enrolled | undefined;
 }
+app.post("/api/lists/:id/sync", async (req, res) => {
+  const list = enrolledList(req.params.id);
+  if (!list) { res.sendStatus(404); return; }
+  if (active.has(list.id)) {
+    res.status(409).json({ error: "This list is already syncing. Try again when it finishes." });
+    return;
+  }
+  await run(list, true);
+  res.sendStatus(204);
+});
 app.get("/api/lists/:id/items", async (req, res) => {
   const list = enrolledList(req.params.id);
   if (!list) { res.sendStatus(404); return; }

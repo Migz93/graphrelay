@@ -58,6 +58,45 @@ function Login({ onLogin, firstRun = false }: { onLogin: () => void; firstRun?: 
   </main>;
 }
 
+function PollingSettings() {
+  const [options, setOptions] = useState<number[]>([]);
+  const [minutes, setMinutes] = useState("");
+  const [saved, setSaved] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    void api<{ minutes: number; options: number[] }>("/polling").then(value => {
+      setOptions(value.options);
+      setMinutes(String(value.minutes));
+      setSaved(String(value.minutes));
+    }).catch(error => setError(error.message));
+  }, []);
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      await api("/polling", "PUT", { minutes: Number(minutes) });
+      setSaved(minutes);
+    } catch (error) {
+      setError((error as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return <SectionCard title="To Do polling" description="Choose how often GraphRelay checks enrolled lists for changes.">
+    {error && <ErrorBanner message={error} />}
+    {!!options.length && <form className="grid gap-3" onSubmit={save}>
+      <label className="grid gap-2 text-sm">Polling interval
+        <SelectInput value={minutes} onChange={setMinutes} disabled={busy}>
+          {options.map(option => <option key={option} value={option}>{option} {option === 1 ? "minute" : "minutes"}</option>)}
+        </SelectInput>
+      </label>
+      <div><button className={secondaryButtonClass} disabled={busy || minutes === saved}>Save polling interval</button></div>
+    </form>}
+  </SectionCard>;
+}
+
 function Settings() {
   const [connection, setConnection] = useState<Connection>();
   const [error, setError] = useState("");
@@ -102,7 +141,7 @@ function Settings() {
   const signInError = reason === "session"
     ? "The Microsoft sign-in session expired or did not match. Start again from Connect Microsoft in this tab."
     : "Microsoft sign-in failed." + (/^AADSTS[0-9]{4,10}$/.test(reason) ? " Microsoft error " + reason + "." : "") + " Try connecting again.";
-  return <Page>
+  return <Page className="space-y-5">
     <PageHeader title="Settings" />
     {(error || (outcome && !savedSecret)) && <ErrorBanner message={error || (outcome === "wrong-account" ? "Reconnect using the Microsoft account that owns your enrolled lists." : signInError)} />}
     <SectionCard title="Microsoft connection" description="Connect the Microsoft account that owns your shared shopping list.">
@@ -129,6 +168,7 @@ function Settings() {
         </details>}
       </>}
     </SectionCard>
+    <PollingSettings />
   </Page>;
 }
 
@@ -332,10 +372,30 @@ function DuplicatePreview({ path, onRemoved }: { path: string; onRemoved: () => 
 function ListDetail({ list, refresh }: { list: List; refresh: () => Promise<void> }) {
   const [showDuplicates, setShowDuplicates] = useState(false);
   const [itemRevision, setItemRevision] = useState(0);
+  const [previewRevision, setPreviewRevision] = useState(0);
   const [history, setHistory] = useState<Activity[]>();
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [error, setError] = useState("");
+  const [syncing, setSyncing] = useState(false);
+  const [syncNotice, setSyncNotice] = useState("");
   const path = "/lists/" + encodeURIComponent(list.id);
+  async function sync() {
+    setSyncing(true);
+    setError("");
+    setSyncNotice("");
+    try {
+      await api(path + "/sync", "POST");
+      setSyncNotice("Sync complete.");
+    } catch (error) {
+      setError((error as Error).message);
+    } finally {
+      setItemRevision(value => value + 1);
+      setPreviewRevision(value => value + 1);
+      setHistory(undefined);
+      await refresh();
+      setSyncing(false);
+    }
+  }
   async function activity() {
     if (history) { setHistory(undefined); return; }
     setError("");
@@ -351,18 +411,20 @@ function ListDetail({ list, refresh }: { list: List; refresh: () => Promise<void
   return <Page className="space-y-5">
     <Link to="/todo" className="text-sm text-on-surface-variant">← To Do</Link>
     <PageHeader title={list.displayName}>
+      <button className={primaryButtonClass} disabled={syncing} onClick={() => void sync()}>{syncing ? "Syncing…" : "Sync Now"}</button>
       <Link className={secondaryButtonClass} to={listUrl(list.id) + "/settings"}>List settings</Link>
       <button className={secondaryButtonClass} aria-expanded={showDuplicates} onClick={() => setShowDuplicates(!showDuplicates)}>{showDuplicates ? "Hide duplicates" : "Preview duplicates"}</button>
       <button className={secondaryButtonClass} disabled={loadingHistory} aria-expanded={!!history} onClick={() => void activity()}>{history ? "Hide activity" : "View activity"}</button>
     </PageHeader>
     <p className="text-sm text-on-surface-variant">{runStatus(list)}</p>
+    {syncNotice && <p role="status" className="text-sm text-success">{syncNotice}</p>}
     {(error || list.error) && <ErrorBanner message={error || list.error!} />}
     {history && <SectionCard title="Activity">
       <ul className="grid gap-2 text-sm">
         {history.length ? history.map((item, index) => <li key={index}><time className="mr-2 text-on-surface-variant">{item.created} UTC</time>{item.message}</li>) : <li>No title changes yet.</li>}
       </ul>
     </SectionCard>}
-    {showDuplicates && <DuplicatePreview path={path} onRemoved={() => { setItemRevision(value => value + 1); setHistory(undefined); }} />}
+    {showDuplicates && <DuplicatePreview key={previewRevision} path={path} onRemoved={() => { setItemRevision(value => value + 1); setHistory(undefined); }} />}
     <ItemAisles key={itemRevision} path={path} aisles={list.order} refresh={refresh} />
   </Page>;
 }
