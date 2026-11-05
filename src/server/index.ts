@@ -341,6 +341,8 @@ async function pollLists() {
 schedulePoll(0);
 
 if (env.TRUST_PROXY === "1") app.set("trust proxy", 1);
+const duplicateRemovalPath = "/api/lists/:id/duplicates/remove";
+app.post(duplicateRemovalPath, express.json({ limit: "512kb" }));
 app.use(express.json({ limit: "16kb" }));
 app.use(session({
   secret: createHash("sha256").update(key).update("session").digest("hex"),
@@ -861,7 +863,7 @@ async function removeDuplicates(list: Enrolled, proposed?: ProposedDuplicate[]) 
   return { removed, skipped, failed };
 }
 
-app.post("/api/lists/:id/duplicates/remove", async (req, res) => {
+app.post(duplicateRemovalPath, async (req, res) => {
   const list = knownList(req.params.id);
   if (!list) { res.sendStatus(404); return; }
   const proposed = req.body?.proposed;
@@ -893,7 +895,11 @@ app.use("/api", (_req, res) => { res.sendStatus(404); });
 const client = resolve("dist/client");
 app.use(express.static(client));
 app.get(/.*/, (_req, res) => { res.sendFile(resolve(client, "index.html")); });
-const handleError: express.ErrorRequestHandler = (error: Error, _req, res, _next) => {
+const handleError: express.ErrorRequestHandler = (error: Error & { type?: string }, _req, res, _next) => {
+  if (error.type === "entity.too.large") {
+    res.status(413).json({ error: "This request exceeds GraphRelay’s size limit." });
+    return;
+  }
   const message = error.message.startsWith("Microsoft Graph returned") || error.message.startsWith("Run failed") || error.message.startsWith("Grouping profiles:")
     ? error.message : "Request failed. Check your Microsoft connection and try again.";
   res.status(502).json({ error: message });
