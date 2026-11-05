@@ -830,8 +830,11 @@ app.get("/api/lists/:id/duplicates", (req, res) => {
 
 type ProposedDuplicate = { id: string; keepId: string; key: string; completed: boolean; keepCompleted: boolean };
 
-type DuplicateRemovalProgress = { operationId: string; processed: number; total: number };
-const duplicateRemovalProgress = new Map<string, DuplicateRemovalProgress>();
+type DuplicateRemovalProgress = { status: "running"; operationId?: string; processed: number; total: number };
+type DuplicateRemovalRun = DuplicateRemovalProgress
+  | { status: "finished"; removed: number; skipped: number; failed: number }
+  | { status: "failed"; error: string };
+const duplicateRemovalRuns = new Map<string, DuplicateRemovalRun>();
 
 async function removeDuplicates(list: Enrolled, proposed?: ProposedDuplicate[], progress?: DuplicateRemovalProgress) {
   const path = taskPath(list.id);
@@ -880,10 +883,16 @@ async function removeDuplicates(list: Enrolled, proposed?: ProposedDuplicate[], 
 }
 
 app.get("/api/lists/:id/duplicates/progress", (req, res) => {
-  const progress = duplicateRemovalProgress.get(req.params.id);
-  res.json(progress && progress.operationId === req.query.operationId
-    ? { processed: progress.processed, total: progress.total }
-    : null);
+  if (!knownList(req.params.id)) { res.sendStatus(404); return; }
+  const run = duplicateRemovalRuns.get(req.params.id);
+  if (req.query.operationId !== undefined) {
+    // Support progress polling from clients already open during an update.
+    res.json(run?.status === "running" && run.operationId === req.query.operationId
+      ? { processed: run.processed, total: run.total }
+      : null);
+    return;
+  }
+  res.json(run ?? null);
 });
 
 app.post(duplicateRemovalPath, async (req, res) => {
@@ -900,23 +909,38 @@ app.post(duplicateRemovalPath, async (req, res) => {
     res.status(409).json({ error: "Wait for the current list run or finish unenrolling it, then try again." });
     return;
   }
-  const operationId = req.body.operationId;
   const copies = proposed as ProposedDuplicate[];
-  const progress = typeof operationId === "string"
-    ? { operationId, processed: 0, total: new Set(copies.map(copy => copy.id)).size }
-    : undefined;
+  const progress: DuplicateRemovalProgress = {
+    status: "running",
+    operationId: typeof req.body.operationId === "string" ? req.body.operationId : undefined,
+    processed: 0,
+    total: new Set(copies.map(copy => copy.id)).size,
+  };
   active.add(list.id);
-  if (progress) duplicateRemovalProgress.set(list.id, progress);
+  duplicateRemovalRuns.set(list.id, progress);
+  const job = finishDuplicateRemoval(list, copies, progress);
+  if (req.body.background === true) {
+    void job.catch(() => undefined);
+    res.status(202).json(progress);
+  } else {
+    res.json(await job);
+  }
+});
+async function finishDuplicateRemoval(list: Enrolled, copies: ProposedDuplicate[], progress: DuplicateRemovalProgress) {
   try {
     const result = await removeDuplicates(list, copies, progress);
     if (result.removed) await syncSnapshot(list).catch(() => undefined);
-    res.json(result);
+    duplicateRemovalRuns.set(list.id, { status: "finished", ...result });
+    return result;
+  } catch (error) {
+    duplicateRemovalRuns.set(list.id, { status: "failed", error: requestErrorMessage(error) });
+    throw error;
   } finally {
-    duplicateRemovalProgress.delete(list.id);
     active.delete(list.id);
     schedulePoll();
   }
-});
+}
+
 app.get("/api/lists/:id/activity", (req, res) => {
   if (!knownList(req.params.id)) { res.sendStatus(404); return; }
   res.json(db.prepare("SELECT created, message FROM activity WHERE list_id = ? ORDER BY id DESC LIMIT 100").all(req.params.id));
@@ -925,14 +949,16 @@ app.use("/api", (_req, res) => { res.sendStatus(404); });
 const client = resolve("dist/client");
 app.use(express.static(client));
 app.get(/.*/, (_req, res) => { res.sendFile(resolve(client, "index.html")); });
+function requestErrorMessage(error: unknown) {
+  return error instanceof Error && (error.message.startsWith("Microsoft Graph returned") || error.message.startsWith("Run failed") || error.message.startsWith("Grouping profiles:"))
+    ? error.message : "Request failed. Check your Microsoft connection and try again.";
+}
 const handleError: express.ErrorRequestHandler = (error: Error & { type?: string }, _req, res, _next) => {
   if (error.type === "entity.too.large") {
     res.status(413).json({ error: "This request exceeds GraphRelay’s size limit." });
     return;
   }
-  const message = error.message.startsWith("Microsoft Graph returned") || error.message.startsWith("Run failed") || error.message.startsWith("Grouping profiles:")
-    ? error.message : "Request failed. Check your Microsoft connection and try again.";
-  res.status(502).json({ error: message });
+  res.status(502).json({ error: requestErrorMessage(error) });
 };
 app.use(handleError);
 app.listen(Number(env.PORT ?? 9304));

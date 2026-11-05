@@ -634,41 +634,36 @@ function GroupingProfiles({ onBusy }: { onBusy: (busy: boolean) => void }) {
 }
 
 type DuplicateCopy = { id: string; title: string; completed: boolean; date?: string; flags: string[] };
-type DuplicateProgress = { processed: number; total: number };
+type DuplicateProgress = { status: "running"; processed: number; total: number };
+type DuplicateRun = DuplicateProgress
+  | { status: "finished"; removed: number; skipped: number; failed: number }
+  | { status: "failed"; error: string };
 
 type DuplicateGroup = { key: string; name: string; keep: DuplicateCopy; copies: DuplicateCopy[] };
 
-function DuplicatePreview({ path, onRemoved, onBusy }: { path: string; onRemoved: () => void; onBusy: (busy: boolean) => void }) {
+function DuplicatePreview({ path, onRemoved }: { path: string; onRemoved: () => void }) {
   const [snapshot, setSnapshot] = useState<{ groups: DuplicateGroup[]; syncedAt: string | null }>();
   const groups = snapshot?.groups;
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(true);
   const [confirming, setConfirming] = useState(false);
-  const [removalId, setRemovalId] = useState<string>();
-  const [progress, setProgress] = useState<DuplicateProgress>();
-  const removing = removalId !== undefined;
-  const [result, setResult] = useState("");
+  const [starting, setStarting] = useState(false);
+  const [run, setRun] = useState<DuplicateRun | null>(null);
+  const progress = run?.status === "running" ? run : null;
+  const removing = starting || !!progress;
   const proposed = groups?.flatMap(group => group.copies.filter(copy => !copy.flags.length).map(copy => ({
     id: copy.id, key: group.key, keepId: group.keep.id, completed: copy.completed, keepCompleted: group.keep.completed,
   }))) ?? [];
   async function remove() {
-    const operationId = crypto.getRandomValues(new Uint32Array(4)).join("-");
-    setProgress({ processed: 0, total: proposed.length });
-    setRemovalId(operationId);
-    onBusy(true);
+    setStarting(true);
+    setConfirming(false);
     setError("");
-    setResult("");
     try {
-      const summary = await api<{ removed: number; skipped: number; failed: number }>(path + "/duplicates/remove", "POST", { proposed, operationId });
-      setResult(`Removed ${summary.removed} · Skipped ${summary.skipped} · Failed ${summary.failed}`);
-      await load(false);
-      if (summary.removed) onRemoved();
+      setRun(await api<DuplicateProgress>(path + "/duplicates/remove", "POST", { proposed, background: true }));
     } catch (error) {
       setError((error as Error).message);
     } finally {
-      setRemovalId(undefined);
-      onBusy(false);
-      setConfirming(false);
+      setStarting(false);
     }
   }
   async function load(refresh = true) {
@@ -686,17 +681,37 @@ function DuplicatePreview({ path, onRemoved, onBusy }: { path: string; onRemoved
       setBusy(false);
     }
   }
-  useEffect(() => { void load(); }, [path]);
   useEffect(() => {
-    if (!removalId) return;
+    let stopped = false;
+    void api<DuplicateRun | null>(path + "/duplicates/progress").then(value => {
+      if (stopped) return;
+      setRun(value);
+      if (value?.status === "finished" && value.removed) onRemoved();
+      void load(value?.status !== "running");
+    }).catch(error => {
+      if (stopped) return;
+      setError(error.message);
+      setBusy(false);
+    });
+    return () => { stopped = true; };
+  }, [path]);
+  const running = !!progress;
+  useEffect(() => {
+    if (!running) return;
     let stopped = false;
     let timer: ReturnType<typeof setTimeout>;
     async function pollProgress() {
       try {
-        const value = await api<DuplicateProgress | null>(path + "/duplicates/progress?operationId=" + removalId);
-        if (!stopped && value) setProgress(value);
+        const value = await api<DuplicateRun | null>(path + "/duplicates/progress");
+        if (stopped) return;
+        setRun(value);
+        if (value?.status !== "running") {
+          if (value?.status === "finished" && value.removed) onRemoved();
+          void load(false);
+          return;
+        }
       } catch {
-        // The removal request reports the outcome independently of progress polling.
+        // A temporary connection error should not stop progress tracking.
       }
       if (!stopped) timer = setTimeout(pollProgress, 750);
     }
@@ -705,11 +720,11 @@ function DuplicatePreview({ path, onRemoved, onBusy }: { path: string; onRemoved
       stopped = true;
       clearTimeout(timer);
     };
-  }, [path, removalId]);
+  }, [path, running]);
   return <div className="grid gap-4">
     <p className="text-sm text-on-surface-variant">GraphRelay keeps an open copy when possible. Review the proposed removals before applying them to Microsoft To Do.</p>
     <div className="flex flex-wrap gap-2">
-      <button className={secondaryButtonClass} disabled={busy || removing} onClick={() => { setConfirming(false); setResult(""); void load(); }}>Refresh Preview</button>
+      <button className={secondaryButtonClass} disabled={busy || removing} onClick={() => { setConfirming(false); void load(); }}>Refresh Preview</button>
       {!!proposed.length && !confirming && <button className={secondaryButtonClass} disabled={busy || removing} onClick={() => setConfirming(true)}>Remove Proposed Duplicates ({proposed.length})</button>}
     </div>
     {confirming && !removing && <div className="grid gap-2 rounded-lg border border-warning/35 p-3">
@@ -719,11 +734,13 @@ function DuplicatePreview({ path, onRemoved, onBusy }: { path: string; onRemoved
         <button className={secondaryButtonClass} disabled={removing} onClick={() => setConfirming(false)}>Cancel</button>
       </div>
     </div>}
-    {removing && !result && progress && <div className="grid gap-2">
+    {progress && <div className="grid gap-2">
       <p role="status">{progress.processed} of {progress.total} processed</p>
       <progress aria-label="Duplicate Cleanup Progress" className="h-2 w-full accent-primary" value={progress.processed} max={progress.total} />
     </div>}
-    {result && <p role="status">{result}</p>}
+    {starting && <p role="status">Starting duplicate cleanup…</p>}
+    {run?.status === "finished" && <p role="status">Removed {run.removed} · Skipped {run.skipped} · Failed {run.failed}</p>}
+    {run?.status === "failed" && <ErrorBanner message={run.error} />}
     {error && <ErrorBanner message={error} />}
     {busy && <p role="status">Refreshing duplicates…</p>}
     {snapshot?.syncedAt === null && <p>Waiting for the first Microsoft sync.</p>}
@@ -747,7 +764,6 @@ function DuplicatePreview({ path, onRemoved, onBusy }: { path: string; onRemoved
 }
 
 function ListDetail({ list, refresh }: { list: List; refresh: () => Promise<void> }) {
-  const [duplicatesBusy, setDuplicatesBusy] = useState(false);
   const [settings, setSettings] = useState(false);
   const [showDuplicates, setShowDuplicates] = useState(false);
   const [itemRevision, setItemRevision] = useState(0);
@@ -812,8 +828,8 @@ function ListDetail({ list, refresh }: { list: List; refresh: () => Promise<void
         {history.length ? history.map((item, index) => <li key={index}><time className="mr-2 text-on-surface-variant">{item.created} UTC</time>{item.message}</li>) : <li>No title changes yet.</li>}
       </ul>
     </SectionCard>}
-    {showDuplicates && <SettingsDialog title="Duplicates" tabs={[]} selected="" select={() => undefined} close={() => { if (!duplicatesBusy) setShowDuplicates(false); }}>
-      <DuplicatePreview key={previewRevision} path={path} onBusy={setDuplicatesBusy} onRemoved={() => { setItemRevision(value => value + 1); setHistory(undefined); void refresh(); }} />
+    {showDuplicates && <SettingsDialog title="Duplicates" tabs={[]} selected="" select={() => undefined} close={() => setShowDuplicates(false)}>
+      <DuplicatePreview key={previewRevision} path={path} onRemoved={() => { setItemRevision(value => value + 1); setHistory(undefined); void refresh(); }} />
     </SettingsDialog>}
     <ItemAisles key={itemRevision} path={path} aisles={list.order} grouped={list.mode !== "off"} refresh={refresh} />
     {settings && list.enrolled && <ListSettings list={list} refresh={async () => { await refresh(); setItemRevision(value => value + 1); setPreviewRevision(value => value + 1); }} close={() => setSettings(false)} />}
