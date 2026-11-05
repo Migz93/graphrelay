@@ -878,7 +878,7 @@ function AvailableLists() {
   const { directory, error } = useListDirectory();
   const available = directory?.lists ?? [];
   const message = error || directory?.directoryError;
-  return <SectionCard title="Available To Enroll">
+  return <SectionCard title="Unenrolled Lists">
     {message && <ErrorBanner message={message} />}
     {available.length ? <ul className="grid gap-2">
       {available.map(list => <li key={list.id}>
