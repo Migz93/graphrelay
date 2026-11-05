@@ -17,7 +17,7 @@ function parseProfile(value: unknown, file: string): Profile {
     || typeof profile.id !== "string" || !/^[a-z0-9][a-z0-9_-]{0,79}$/i.test(profile.id) || profile.id === "new"
     || typeof profile.name !== "string" || !profile.name.trim() || profile.name.length > 80
     || typeof profile.grocery !== "boolean" || (profile.ignoreQuantities !== undefined && typeof profile.ignoreQuantities !== "boolean")
-    || !Array.isArray(groups) || groups.length < 2 || groups.length > 30
+    || !Array.isArray(groups) || groups.length < 1 || groups.length > 30
     || !groups.every(group => group && typeof group.name === "string" && !!group.name.trim() && group.name.length <= 40
       && validNames(group.matches) && (group.defaultMatches === undefined || validNames(group.defaultMatches))
       && (group.prefixes === undefined || validNames(group.prefixes)))) {

@@ -518,15 +518,19 @@ app.put("/api/grouping-profiles/:id", (req, res) => {
   const values = profiles();
   const existing = values.find(profile => profile.id === req.params.id);
   if (!existing && req.params.id !== "new") { res.sendStatus(404); return; }
-  const { name, groups } = req.body ?? {};
+  const { name, groups, allMatches } = req.body ?? {};
   if (typeof name !== "string" || !name.trim() || name.trim().length > 80
-    || !Array.isArray(groups) || groups.length < 2 || groups.length > 30
+    || !Array.isArray(groups) || groups.length < 1 || groups.length > 30
     || !groups.every(group => typeof group?.name === "string" && !!group.name.trim() && group.name.trim().length <= 40
-      && Array.isArray(group.matches) && group.matches.every((match: unknown) => typeof match === "string"))) {
-    res.status(400).json({ error: "Enter a profile name and between 2 and 30 named groups." });
+      && Array.isArray(group.matches) && group.matches.every((match: unknown) => typeof match === "string")
+      && (allMatches !== true || Array.isArray(group.prefixes) && group.prefixes.every((prefix: unknown) => typeof prefix === "string")))) {
+    res.status(400).json({ error: "Enter a profile name and between 1 and 30 named groups." });
     return;
   }
-  const normalized = (groups as Profile["groups"]).map(group => ({ name: group.name.trim(), matches: group.matches.map(itemKey).filter(Boolean) }));
+  const normalized = (groups as Profile["groups"]).map(group => ({
+    name: group.name.trim(), matches: group.matches.map(itemKey).filter(Boolean),
+    prefixes: group.prefixes?.map(itemKey).filter(Boolean),
+  }));
   const names = normalized.map(group => itemKey(group.name));
   const matches = normalized.flatMap(group => group.matches);
   if (!normalized.some(group => group.name === "Other") || new Set(names).size !== names.length || new Set(matches).size !== matches.length) {
@@ -539,7 +543,7 @@ app.put("/api/grouping-profiles/:id", (req, res) => {
     name: name.trim(),
     groups: normalized.map(group => {
       const previous = existing?.groups.find(value => value.name === group.name);
-      return { ...group, defaultMatches: previous?.defaultMatches, prefixes: previous?.prefixes };
+      return { ...group, defaultMatches: allMatches === true ? [] : previous?.defaultMatches, prefixes: allMatches === true ? group.prefixes : previous?.prefixes };
     }),
   };
   groupingStore.save(profile);

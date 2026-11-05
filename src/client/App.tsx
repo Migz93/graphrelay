@@ -1,6 +1,10 @@
-import { ArrowDown, ArrowUp, Plus, X } from "lucide-react";
+import { DndContext, DragOverlay, KeyboardSensor, PointerSensor, closestCenter, pointerWithin, rectIntersection, useDraggable, useSensor, useSensors, type CollisionDetection, type DragEndEvent } from "@dnd-kit/core";
+import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { groupingDraft, matchKey, moveMatch, removeGroup, type GroupDraft, type MatchGroup } from "./lib/groupingDraft";
+import { GripVertical, Minus, Plus, X } from "lucide-react";
 import { useDialogA11y } from "./hooks/useDialogA11y";
-import { useEffect, useId, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import Layout, { type BuildInfo } from "./components/Layout";
 import { ErrorBanner, Page, PageHeader, PageLoading } from "./components/Page";
@@ -46,17 +50,25 @@ function Login({ onLogin, firstRun = false }: { onLogin: () => void; firstRun?: 
       setBusy(false);
     }
   }
-  return <main className="mx-auto mt-24 max-w-md p-6">
-    <PageHeader title="GraphRelay" />
-    <SectionCard title={firstRun ? "Set up GraphRelay" : "Sign in"} description={firstRun ? "Choose a password for the GraphRelay web interface." : "Use the administrator password for this instance."}>
-      {error && <ErrorBanner message={error} />}
-      <form onSubmit={submit} className="grid gap-4">
-        <label className="grid gap-2">Password
-          <TextInput type="password" autoComplete={firstRun ? "new-password" : "current-password"} value={password} onChange={setPassword} required />
-        </label>
-        <button className={primaryButtonClass} disabled={busy}>{firstRun ? "Create admin password" : "Sign in"}</button>
-      </form>
-    </SectionCard>
+  return <main className="flex min-h-screen items-center justify-center bg-background px-4 py-10">
+    <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(229,9,20,0.18),transparent_32rem),linear-gradient(135deg,rgba(36,37,43,0.65),transparent_42rem)]" />
+    <form onSubmit={submit} className="relative w-full max-w-md rounded-3xl border border-outline-variant/30 bg-background-container-low/90 p-8 shadow-2xl backdrop-blur">
+      <div className="mb-8 flex items-center gap-3">
+        <img src="/graphrelay-logo.svg" alt="" aria-hidden="true" className="size-11 rounded-xl object-cover" />
+        <div>
+          <h1 className="font-headline text-2xl font-bold text-on-surface">GraphRelay</h1>
+          <p className="text-sm text-on-surface-variant">{firstRun ? "Create the admin password" : "Sign in to continue"}</p>
+        </div>
+      </div>
+      <label htmlFor="password" className="mb-2 block text-sm font-semibold text-on-surface">Password</label>
+      <input id="password" type="password" autoComplete={firstRun ? "new-password" : "current-password"}
+        value={password} onChange={event => setPassword(event.target.value)} required
+        className="w-full rounded-xl border border-outline-variant/40 bg-background-container px-4 py-3 text-on-surface outline-none focus:border-primary" />
+      {error && <div role="alert" className="mt-5 rounded-xl border border-error/30 bg-error/10 px-4 py-3 text-sm text-error">{error}</div>}
+      <button type="submit" disabled={busy} className="mt-7 w-full rounded-xl bg-primary px-4 py-3 text-sm font-bold text-on-surface transition-colors hover:bg-primary-dim disabled:cursor-not-allowed disabled:opacity-60">
+        {busy ? "Please wait…" : firstRun ? "Create admin password" : "Sign in"}
+      </button>
+    </form>
   </main>;
 }
 
@@ -282,7 +294,7 @@ function runStatus(list: List) {
   return list.lastRun ? "Last run · " + new Date(list.lastRun).toLocaleString() : "No runs yet";
 }
 
-type GroupingProfile = { id: string; name: string; grocery: boolean; usedBy: number; groups: { name: string; matches: string[] }[] };
+type GroupingProfile = { id: string; name: string; grocery: boolean; usedBy: number; groups: MatchGroup[] };
 
 function SettingsDialog({ title, tabs, selected, select, close, wide = false, children }: {
   title: string; tabs: string[]; selected: string; select: (tab: string) => void; close: () => void; wide?: boolean; children: ReactNode;
@@ -395,79 +407,128 @@ function ListSettings({ list, refresh, close }: { list: List; refresh: () => Pro
   </SettingsDialog>;
 }
 
-type GroupDraft = { name: string; matches: string; locked: boolean };
+function GroupRow({ group, selected, busy, choose, remove }: {
+  group: GroupDraft; selected: boolean; busy: boolean; choose: () => void; remove: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging, isOver } = useSortable({
+    id: "group:" + group.id, data: { kind: "group", groupId: group.id, label: group.name }, disabled: busy,
+  });
+  return <div ref={setNodeRef} data-group-id={group.id}
+    style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.35 : 1 }}
+    className={`flex items-center gap-1 rounded-lg border ${isOver ? "border-primary" : "border-transparent"} ${selected ? "bg-primary-dim text-on-surface" : "text-on-surface-variant hover:bg-background-container-high"}`}>
+    <button type="button" className="touch-none rounded p-2 focus-visible:outline-2 focus-visible:outline-primary" {...attributes} {...listeners} disabled={busy} aria-label={"Reorder " + (group.name || "new group")}><GripVertical size={16} /></button>
+    <button type="button" className="min-w-0 flex-1 py-2 text-left text-sm" disabled={busy} aria-pressed={selected} onClick={choose}>
+      <span className="block truncate">{group.name || "New group"}</span>
+      <span className="text-xs opacity-70">{group.matches.length} items</span>
+    </button>
+    <button type="button" className="rounded p-2 hover:bg-background-bright disabled:opacity-30" disabled={busy || group.fallback} aria-label={"Remove group " + group.name} title={group.fallback ? "Other is required" : "Move items to Other and remove group"} onClick={remove}><Minus size={16} /></button>
+  </div>;
+}
+
+function MatchChip({ item, groupId, busy, selected, choose, remove }: {
+  item: string; groupId: string; busy: boolean; selected: boolean; choose: () => void; remove: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: "match:" + item, data: { kind: "item", item, groupId, label: item }, disabled: busy,
+  });
+  return <span ref={setNodeRef} className={`inline-flex max-w-full items-center rounded-lg border bg-background-container-high text-sm ${selected ? "border-primary" : "border-outline-variant/30"} ${isDragging ? "opacity-30" : ""}`}>
+    <button type="button" disabled={busy} {...attributes} onPointerDown={event => listeners?.onPointerDown?.(event)} aria-label={"Move match " + item}
+      className="min-w-0 touch-none break-words px-3 py-2 text-left focus-visible:outline-2 focus-visible:outline-primary" onClick={choose}>{item}</button>
+    <button type="button" disabled={busy} aria-label={"Remove match " + item} className="shrink-0 rounded p-2 text-on-surface-variant hover:text-error" onClick={remove}><X size={12} /></button>
+  </span>;
+}
+
+const profileCollision: CollisionDetection = args => args.active.data.current?.kind === "item"
+  ? args.pointerCoordinates ? pointerWithin(args) : rectIntersection(args)
+  : closestCenter(args);
 
 function GroupingProfiles({ cancel, onBusy }: { cancel: () => void; onBusy: (busy: boolean) => void }) {
   const [profiles, setProfiles] = useState<GroupingProfile[]>();
   const [selected, setSelected] = useState("");
-  const [activeIndex, setActiveIndex] = useState(0);
+  const [activeId, setActiveId] = useState("");
   const [name, setName] = useState("");
   const [groups, setGroups] = useState<GroupDraft[]>([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [addingItem, setAddingItem] = useState(false);
+  const [itemName, setItemName] = useState("");
+  const [moveItem, setMoveItem] = useState("");
+  const [arranging, setArranging] = useState(false);
+  const [dragLabel, setDragLabel] = useState("");
+  const nextId = useRef(0);
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
   const current = profiles?.find(profile => profile.id === selected);
-  const activeGroup = groups[activeIndex];
+  const activeGroup = groups.find(group => group.id === activeId);
   function choose(id: string, values = profiles) {
     const profile = values?.find(profile => profile.id === id);
+    const draft = groupingDraft(profile?.groups ?? [{ name: "", matches: [] }, { name: "Other", matches: [] }]);
     setSelected(id);
-    setActiveIndex(0);
+    setActiveId(draft[0].id);
     setName(profile?.name ?? "");
-    setGroups(profile?.groups.map(group => ({
-      name: group.name, matches: group.matches.join("\n"),
-      locked: group.name === "Other" || !!profile.grocery && ["Produce", "Meat", "Frozen", "Dairy", "Bakery", "Pantry"].includes(group.name),
-    })) ?? [{ name: "", matches: "", locked: false }, { name: "Other", matches: "", locked: true }]);
+    setGroups(draft);
     setError("");
     setNotice("");
+    setMoveItem("");
+    setAddingItem(false);
+    setItemName("");
   }
   useEffect(() => {
     void api<GroupingProfile[]>("/grouping-profiles").then(values => { setProfiles(values); choose("groceries", values); }).catch(error => setError(error.message));
   }, []);
+  function selectGroup(id: string) {
+    setActiveId(id);
+    setMoveItem("");
+    setAddingItem(false);
+    setItemName("");
+  }
   async function save(event: FormEvent) {
     event.preventDefault();
-    const unnamed = groups.findIndex(group => !group.name.trim());
-    if (unnamed >= 0) {
-      setActiveIndex(unnamed);
-      setError("Give every group a name before saving.");
-      return;
-    }
-    setBusy(true);
-    onBusy(true);
-    setError("");
-    setNotice("");
+    const unnamed = groups.find(group => !group.name.trim());
+    if (unnamed) { setActiveId(unnamed.id); setError("Give every group a name before saving."); return; }
+    setBusy(true); onBusy(true); setError(""); setNotice("");
     try {
-      const saved = await api<GroupingProfile>("/grouping-profiles/" + selected, "PUT", { name, groups: groups.map(group => ({ name: group.name, matches: group.matches.split("\n") })) });
+      const saved = await api<GroupingProfile>("/grouping-profiles/" + selected, "PUT", { name, allMatches: true, groups: groups.map(({ name, matches, prefixes }) => ({ name, matches, prefixes })) });
       const values = await api<GroupingProfile[]>("/grouping-profiles");
-      setProfiles(values);
-      choose(saved.id, values);
+      setProfiles(values); choose(saved.id, values);
       setNotice("Profile saved. Lists using it will update on their next sync.");
-    } catch (error) {
-      setError((error as Error).message);
-    } finally {
-      setBusy(false);
-      onBusy(false);
+    } catch (error) { setError((error as Error).message); }
+    finally { setBusy(false); onBusy(false); }
+  }
+  function addGroup() {
+    const id = "new-" + nextId.current++;
+    setGroups([...groups, { id, name: "", matches: [], prefixes: [], fallback: false }]);
+    selectGroup(id);
+    setNotice("");
+  }
+  function deleteGroup(id: string) {
+    const next = removeGroup(groups, id);
+    setGroups(next);
+    if (id === activeId) selectGroup(next.find(group => group.fallback)!.id);
+    setNotice("");
+  }
+  function moveTo(item: string, target: string) {
+    setGroups(moveMatch(groups, item, target));
+    setMoveItem(""); setNotice("");
+  }
+  function dragEnd(event: DragEndEvent) {
+    setDragLabel("");
+    if (!event.over) return;
+    const data = event.active.data.current;
+    const target = event.over.data.current?.groupId as string | undefined;
+    if (!target) return;
+    if (data?.kind === "item") moveTo(data.item as string, target);
+    else {
+      const from = groups.findIndex(group => group.id === data?.groupId);
+      const to = groups.findIndex(group => group.id === target);
+      if (from >= 0 && to >= 0) { setGroups(arrayMove(groups, from, to)); setNotice(""); }
     }
   }
-  function move(direction: number) {
-    const next = [...groups];
-    const destination = activeIndex + direction;
-    [next[activeIndex], next[destination]] = [next[destination], next[activeIndex]];
-    setGroups(next);
-    setActiveIndex(destination);
-  }
-  function update(changes: Partial<GroupDraft>) {
-    setGroups(groups.map((group, index) => index === activeIndex ? { ...group, ...changes } : group));
-    setNotice("");
-  }
-  function add() {
-    setGroups([...groups, { name: "", matches: "", locked: false }]);
-    setActiveIndex(groups.length);
-    setNotice("");
-  }
-  function remove() {
-    setGroups(groups.filter((_, index) => index !== activeIndex));
-    setActiveIndex(Math.max(0, activeIndex - 1));
-    setNotice("");
+  function addItem() {
+    const item = matchKey(itemName);
+    if (!item || !activeGroup) return;
+    moveTo(item, activeGroup.id);
+    setItemName(""); setAddingItem(false);
   }
   return <form onSubmit={save} className="flex min-h-0 flex-1 flex-col">
     <div className="min-h-0 flex-1 overflow-y-auto md:flex md:flex-col md:overflow-hidden">
@@ -476,63 +537,51 @@ function GroupingProfiles({ cancel, onBusy }: { cancel: () => void; onBusy: (bus
       {!profiles && !error && <p>Loading grouping profiles…</p>}
       {profiles && <>
         <div className="mb-4 grid shrink-0 gap-3 md:grid-cols-2">
-          <label className="grid gap-2 text-sm">Profile
-            <SelectInput value={selected} onChange={value => choose(value)} disabled={busy}>
-              {profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
-              <option value="new">Create a profile…</option>
-            </SelectInput>
-          </label>
+          <label className="grid gap-2 text-sm">Profile<SelectInput value={selected} onChange={value => choose(value)} disabled={busy}>
+            {profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}<option value="new">Create a profile…</option>
+          </SelectInput></label>
           <label className="grid gap-2 text-sm">Profile name<TextInput value={name} onChange={value => { setName(value); setNotice(""); }} required maxLength={80} disabled={busy} /></label>
-          {current && <p className="text-sm text-on-surface-variant md:col-span-2">Used by {current.usedBy} {current.usedBy === 1 ? "list" : "lists"}.{current.grocery ? " Includes the built-in grocery matcher." : ""}</p>}
+          {current && <p className="text-sm text-on-surface-variant md:col-span-2">Used by {current.usedBy} {current.usedBy === 1 ? "list" : "lists"}.</p>}
         </div>
-        <div className="grid min-h-0 flex-1 gap-4 md:grid-cols-[15rem_minmax(0,1fr)]">
-          <div className="grid gap-2 md:hidden">
-            <label htmlFor="profile-mobile-group" className="text-sm">Selected group</label>
-            <div className="grid grid-cols-[minmax(0,1fr)_2.5rem_2.5rem_2.5rem] items-center gap-2">
-              <SelectInput id="profile-mobile-group" value={activeIndex} onChange={value => setActiveIndex(Number(value))} disabled={busy}>
-                {groups.map((group, index) => <option key={index} value={index}>{index + 1}. {group.name || "New group"}</option>)}
-              </SelectInput>
-              <button type="button" className={secondaryButtonClass} aria-label="Move up" title="Move up" disabled={busy || !activeIndex} onClick={() => move(-1)}><ArrowUp size={16} className="shrink-0" /></button>
-              <button type="button" className={secondaryButtonClass} aria-label="Move down" title="Move down" disabled={busy || activeIndex >= groups.length - 1} onClick={() => move(1)}><ArrowDown size={16} className="shrink-0" /></button>
-              <button type="button" className={secondaryButtonClass} aria-label="Add group" title="Add group" disabled={busy || groups.length >= 30} onClick={add}><Plus size={16} className="shrink-0" /></button>
-            </div>
-          </div>
-          <div className="hidden min-h-0 flex-col rounded-xl border border-outline-variant/30 bg-background-container-low p-3 md:flex">
-            <div className="mb-3 flex shrink-0 items-center justify-between gap-2">
-              <h3 className="text-sm font-semibold">Group order</h3>
-              <span className="text-xs text-on-surface-variant">{groups.length} groups</span>
-            </div>
-            <nav aria-label="Profile groups" className="hidden min-h-0 flex-1 space-y-1 overflow-y-auto md:block">
-              {groups.map((group, index) => <button key={index} type="button" disabled={busy} aria-pressed={activeIndex === index}
-                className={`flex w-full items-center gap-3 rounded-lg px-3 py-1.5 text-left text-sm ${activeIndex === index ? "bg-primary-dim text-on-surface" : "text-on-surface-variant hover:bg-background-container-high hover:text-on-surface"}`}
-                onClick={() => setActiveIndex(index)}>
-                <span className="w-5 shrink-0 text-xs opacity-70">{String(index + 1).padStart(2, "0")}</span>
-                <span className="truncate">{group.name || "New group"}</span>
-              </button>)}
-            </nav>
-            <div className="mt-3 grid shrink-0 gap-2 border-t border-outline-variant/30 pt-3">
-              <div className="grid grid-cols-2 gap-2">
-                <button type="button" className={secondaryButtonClass + " whitespace-nowrap text-xs"} disabled={busy || !activeIndex} onClick={() => move(-1)}>Move up</button>
-                <button type="button" className={secondaryButtonClass + " whitespace-nowrap text-xs"} disabled={busy || activeIndex >= groups.length - 1} onClick={() => move(1)}>Move down</button>
+        <DndContext sensors={sensors} collisionDetection={profileCollision} onDragStart={event => { setDragLabel(String(event.active.data.current?.label ?? "")); setMoveItem(""); }}
+          onDragEnd={dragEnd} onDragCancel={() => setDragLabel("")}>
+          <div className="grid min-h-0 flex-1 gap-4 md:grid-cols-[15rem_minmax(0,1fr)]">
+            <div className="flex min-h-0 flex-col rounded-xl border border-outline-variant/30 bg-background-container-low p-3">
+              <div className="mb-3 hidden shrink-0 items-center justify-between gap-2 md:flex"><h3 className="text-sm font-semibold">Group order</h3><span className="text-xs text-on-surface-variant">{groups.length} groups</span></div>
+              <div className="grid grid-cols-[minmax(0,1fr)_2.5rem_2.5rem] items-end gap-2 md:hidden">
+                <label className="grid gap-2 text-sm">Selected group<SelectInput value={activeId} onChange={selectGroup} disabled={busy}>{groups.map(group => <option key={group.id} value={group.id}>{group.name || "New group"}</option>)}</SelectInput></label>
+                <button type="button" className={secondaryButtonClass} aria-label="Remove selected group" disabled={busy || activeGroup?.fallback} onClick={() => deleteGroup(activeId)}><Minus size={16} /></button>
+                <button type="button" className={secondaryButtonClass} aria-label="Add group" disabled={busy || groups.length >= 30} onClick={addGroup}><Plus size={16} /></button>
               </div>
-              <button type="button" className={secondaryButtonClass} disabled={busy || groups.length >= 30} onClick={add}>Add group</button>
+              <button type="button" className="mt-2 text-left text-xs text-on-surface-variant md:hidden" aria-expanded={arranging} onClick={() => setArranging(!arranging)}>{arranging ? "Hide group order" : "Arrange groups"}</button>
+              <nav aria-label="Profile groups" className={`min-h-0 space-y-1 overflow-y-auto ${arranging ? "mt-2 max-h-40" : "hidden"} md:mt-0 md:block md:max-h-none md:flex-1`}>
+                <SortableContext items={groups.map(group => "group:" + group.id)} strategy={verticalListSortingStrategy}>
+                  {groups.map(group => <GroupRow key={group.id} group={group} selected={group.id === activeId} busy={busy} choose={() => selectGroup(group.id)} remove={() => deleteGroup(group.id)} />)}
+                </SortableContext>
+              </nav>
+              <button type="button" className={secondaryButtonClass + " mt-3 hidden shrink-0 md:flex"} disabled={busy || groups.length >= 30} aria-label="Add group" onClick={addGroup}><Plus size={16} />Add group</button>
             </div>
+            {activeGroup && <fieldset disabled={busy} className="flex min-h-0 min-w-0 flex-col gap-4 rounded-xl border border-outline-variant/30 p-4 md:overflow-y-auto">
+              <label className="grid shrink-0 gap-2 text-sm">Group name<TextInput value={activeGroup.name} onChange={value => { setGroups(groups.map(group => group.id === activeId ? { ...group, name: value } : group)); setNotice(""); }} required maxLength={40} readOnly={activeGroup.fallback} /></label>
+              <div className="flex min-h-0 flex-1 flex-col gap-2">
+                <h3 className="text-sm">Item Matches</h3>
+                <div aria-label="Item matches" className="flex min-h-24 content-start flex-wrap items-start gap-2 overflow-y-auto rounded-lg border border-outline-variant/30 bg-background p-3 md:flex-1">
+                  {activeGroup.matches.map(item => <MatchChip key={item} item={item} groupId={activeId} busy={busy} selected={moveItem === item} choose={() => setMoveItem(moveItem === item ? "" : item)} remove={() => { setGroups(groups.map(group => group.id === activeId ? { ...group, matches: group.matches.filter(value => value !== item) } : group)); setMoveItem(""); setNotice(""); }} />)}
+                  <button type="button" className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-dashed border-outline-variant text-on-surface-variant hover:border-primary hover:text-on-surface" aria-label="Add item match" disabled={busy} onClick={() => setAddingItem(true)}><Plus size={16} /></button>
+                </div>
+              </div>
+              {addingItem && <div className="flex shrink-0 flex-wrap items-end gap-2">
+                <label className="grid min-w-0 flex-1 gap-2 text-sm">New item match<TextInput autoFocus value={itemName} onChange={setItemName} onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); addItem(); } if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setAddingItem(false); } }} /></label>
+                <button type="button" className={secondaryButtonClass} disabled={!itemName.trim()} onClick={addItem}>Add item</button>
+              </div>}
+              {moveItem && <label className="grid shrink-0 gap-2 text-sm">Move {moveItem} to
+                <SelectInput value={activeId} onChange={value => moveTo(moveItem, value)}>{groups.map(group => <option key={group.id} value={group.id}>{group.name || "New group"}</option>)}</SelectInput>
+              </label>}
+              {!!activeGroup.prefixes.length && <p className="shrink-0 text-xs text-on-surface-variant">Also matches names starting with {activeGroup.prefixes.join(", ")}.</p>}
+            </fieldset>}
           </div>
-          {activeGroup && <fieldset disabled={busy} className="flex min-h-0 min-w-0 flex-col gap-4 rounded-xl border border-outline-variant/30 p-4 md:overflow-y-auto">
-            <label className="grid shrink-0 gap-2 text-sm">Group name
-              <TextInput value={activeGroup.name} onChange={value => update({ name: value })} required maxLength={40} readOnly={activeGroup.locked} />
-            </label>
-            <label className="flex min-h-0 flex-1 flex-col gap-2 text-sm">
-              {current?.grocery ? "Additional item matches" : "Item matches"}
-              <textarea className="min-h-32 w-full flex-1 resize-y rounded-lg border border-outline-variant/30 bg-background-container-high p-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary md:resize-none"
-                value={activeGroup.matches} onChange={event => update({ matches: event.target.value })} />
-            </label>
-            <p className="shrink-0 text-xs leading-relaxed text-on-surface-variant">
-              {current?.grocery ? "The built-in grocery matcher still applies. Add extra exact item names here, one per line." : "Enter one exact item name per line. Items without a match go to Other."}
-            </p>
-            {!activeGroup.locked && <div className="shrink-0"><button type="button" className={dangerButtonClass} onClick={remove}>Remove group</button></div>}
-          </fieldset>}
-        </div>
+          <DragOverlay dropAnimation={null}>{dragLabel && <span className="rounded-lg border border-primary bg-background-container-high px-3 py-2 text-sm shadow-xl">{dragLabel}</span>}</DragOverlay>
+        </DndContext>
       </>}
     </div>
     <div className="mt-4 flex shrink-0 items-center justify-end gap-2 border-t border-outline-variant/30 pt-4">
