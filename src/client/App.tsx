@@ -284,18 +284,18 @@ function runStatus(list: List) {
 
 type GroupingProfile = { id: string; name: string; grocery: boolean; usedBy: number; groups: { name: string; matches: string[] }[] };
 
-function SettingsDialog({ title, tabs, selected, select, close, children }: {
-  title: string; tabs: string[]; selected: string; select: (tab: string) => void; close: () => void; children: ReactNode;
+function SettingsDialog({ title, tabs, selected, select, close, wide = false, children }: {
+  title: string; tabs: string[]; selected: string; select: (tab: string) => void; close: () => void; wide?: boolean; children: ReactNode;
 }) {
   const id = useId();
   const ref = useDialogA11y<HTMLDivElement>(true, close);
   return <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm" onClick={close}>
-    <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={id} className="max-h-[90dvh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-outline-variant/20 bg-background-container p-6 shadow-xl" onClick={event => event.stopPropagation()}>
-      <div className="mb-4 flex items-center justify-between gap-2">
+    <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={id} className={`w-full rounded-2xl border border-outline-variant/20 bg-background-container p-4 shadow-xl sm:p-6 ${wide ? "flex h-[90dvh] max-h-[52rem] max-w-5xl flex-col overflow-hidden" : "max-h-[90dvh] max-w-2xl overflow-y-auto"}`} onClick={event => event.stopPropagation()}>
+      <div className="mb-4 flex shrink-0 items-center justify-between gap-2">
         <h2 id={id} className="font-headline text-lg font-semibold">{title}</h2>
         <button type="button" aria-label="Close settings" data-overlay-initial-focus onClick={close} className="rounded-lg p-1.5 text-on-surface-variant hover:bg-background-container-high hover:text-on-surface"><X size={18} /></button>
       </div>
-      <div className="mb-5 flex flex-wrap gap-2 border-b border-outline-variant/30 pb-3" aria-label="Settings sections">
+      <div className="mb-5 flex shrink-0 flex-wrap gap-2 border-b border-outline-variant/30 pb-3" aria-label="Settings sections">
         {tabs.map(tab => <button key={tab} type="button" aria-pressed={selected === tab} className={selected === tab ? primaryButtonClass : secondaryButtonClass} onClick={() => select(tab)}>{tab}</button>)}
       </div>
       {children}
@@ -395,20 +395,28 @@ function ListSettings({ list, refresh, close }: { list: List; refresh: () => Pro
   </SettingsDialog>;
 }
 
-function GroupingProfiles() {
+type GroupDraft = { name: string; matches: string; locked: boolean };
+
+function GroupingProfiles({ cancel, onBusy }: { cancel: () => void; onBusy: (busy: boolean) => void }) {
   const [profiles, setProfiles] = useState<GroupingProfile[]>();
   const [selected, setSelected] = useState("");
+  const [activeIndex, setActiveIndex] = useState(0);
   const [name, setName] = useState("");
-  const [groups, setGroups] = useState<{ name: string; matches: string }[]>([]);
+  const [groups, setGroups] = useState<GroupDraft[]>([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const current = profiles?.find(profile => profile.id === selected);
+  const activeGroup = groups[activeIndex];
   function choose(id: string, values = profiles) {
     const profile = values?.find(profile => profile.id === id);
     setSelected(id);
+    setActiveIndex(0);
     setName(profile?.name ?? "");
-    setGroups(profile?.groups.map(group => ({ name: group.name, matches: group.matches.join("\n") })) ?? [{ name: "", matches: "" }, { name: "Other", matches: "" }]);
+    setGroups(profile?.groups.map(group => ({
+      name: group.name, matches: group.matches.join("\n"),
+      locked: group.name === "Other" || !!profile.grocery && ["Produce", "Meat", "Frozen", "Dairy", "Bakery", "Pantry"].includes(group.name),
+    })) ?? [{ name: "", matches: "", locked: false }, { name: "Other", matches: "", locked: true }]);
     setError("");
     setNotice("");
   }
@@ -417,7 +425,14 @@ function GroupingProfiles() {
   }, []);
   async function save(event: FormEvent) {
     event.preventDefault();
+    const unnamed = groups.findIndex(group => !group.name.trim());
+    if (unnamed >= 0) {
+      setActiveIndex(unnamed);
+      setError("Give every group a name before saving.");
+      return;
+    }
     setBusy(true);
+    onBusy(true);
     setError("");
     setNotice("");
     try {
@@ -430,55 +445,103 @@ function GroupingProfiles() {
       setError((error as Error).message);
     } finally {
       setBusy(false);
+      onBusy(false);
     }
   }
-  function move(index: number, direction: number) {
+  function move(direction: number) {
     const next = [...groups];
-    [next[index], next[index + direction]] = [next[index + direction], next[index]];
+    const destination = activeIndex + direction;
+    [next[activeIndex], next[destination]] = [next[destination], next[activeIndex]];
     setGroups(next);
+    setActiveIndex(destination);
   }
-  return <div className="grid gap-4">
-    {error && <ErrorBanner message={error} />}
-    {notice && <p role="status" className="text-sm text-success">{notice}</p>}
-    {profiles && <form onSubmit={save} className="grid gap-4">
-      <label className="grid gap-2 text-sm">Profile
-        <SelectInput value={selected} onChange={value => choose(value)} disabled={busy}>
-          {profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
-          <option value="new">Create a profile…</option>
-        </SelectInput>
-      </label>
-      {current && <p className="text-sm text-on-surface-variant">Used by {current.usedBy} {current.usedBy === 1 ? "list" : "lists"}.{current.grocery ? " Includes the built-in grocery matcher." : ""}</p>}
-      <fieldset disabled={busy} className="grid gap-4">
-        <label className="grid gap-2 text-sm">Profile name<TextInput value={name} onChange={setName} required maxLength={80} /></label>
-        <p className="text-sm text-on-surface-variant">Groups are applied in this order. Enter one exact item name per line. Items without a match go to Other.</p>
-        {groups.map((group, index) => {
-          const locked = group.name === "Other" || !!current?.grocery && ["Produce", "Meat", "Frozen", "Dairy", "Bakery", "Pantry"].includes(group.name);
-          const update = (changes: Partial<typeof group>) => setGroups(groups.map((value, i) => i === index ? { ...value, ...changes } : value));
-          return <div key={index} className="grid gap-2 rounded-lg border border-outline-variant/30 p-3">
-            <label className="grid gap-2 text-sm">Group {index + 1}<TextInput value={group.name} onChange={value => update({ name: value })} required maxLength={40} readOnly={locked} /></label>
-            <label className="grid gap-2 text-sm">Item matches
-              <textarea className="min-h-20 rounded-lg border border-outline-variant/30 bg-background-container-high p-2" value={group.matches} onChange={event => update({ matches: event.target.value })} />
-            </label>
-            <div className="flex flex-wrap gap-2">
-              <button type="button" className={secondaryButtonClass} disabled={!index} onClick={() => move(index, -1)}>Move up</button>
-              <button type="button" className={secondaryButtonClass} disabled={index === groups.length - 1} onClick={() => move(index, 1)}>Move down</button>
-              {!locked && <button type="button" className={secondaryButtonClass} onClick={() => setGroups(groups.filter((_, i) => i !== index))}>Remove group</button>}
-            </div>
-          </div>;
-        })}
-        <div className="flex flex-wrap gap-2">
-          <button type="button" className={secondaryButtonClass} disabled={groups.length >= 30} onClick={() => setGroups([...groups, { name: "", matches: "" }])}>Add group</button>
-          <button className={primaryButtonClass}>Save profile</button>
+  function update(changes: Partial<GroupDraft>) {
+    setGroups(groups.map((group, index) => index === activeIndex ? { ...group, ...changes } : group));
+    setNotice("");
+  }
+  function add() {
+    setGroups([...groups, { name: "", matches: "", locked: false }]);
+    setActiveIndex(groups.length);
+    setNotice("");
+  }
+  function remove() {
+    setGroups(groups.filter((_, index) => index !== activeIndex));
+    setActiveIndex(Math.max(0, activeIndex - 1));
+    setNotice("");
+  }
+  return <form onSubmit={save} className="flex min-h-0 flex-1 flex-col">
+    <div className="min-h-0 flex-1 overflow-y-auto md:flex md:flex-col md:overflow-hidden">
+      {error && <ErrorBanner message={error} />}
+      {notice && <p role="status" className="mb-3 text-sm text-success">{notice}</p>}
+      {!profiles && !error && <p>Loading grouping profiles…</p>}
+      {profiles && <>
+        <div className="mb-4 grid shrink-0 gap-3 md:grid-cols-2">
+          <label className="grid gap-2 text-sm">Profile
+            <SelectInput value={selected} onChange={value => choose(value)} disabled={busy}>
+              {profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
+              <option value="new">Create a profile…</option>
+            </SelectInput>
+          </label>
+          <label className="grid gap-2 text-sm">Profile name<TextInput value={name} onChange={value => { setName(value); setNotice(""); }} required maxLength={80} disabled={busy} /></label>
+          {current && <p className="text-sm text-on-surface-variant md:col-span-2">Used by {current.usedBy} {current.usedBy === 1 ? "list" : "lists"}.{current.grocery ? " Includes the built-in grocery matcher." : ""}</p>}
         </div>
-      </fieldset>
-    </form>}
-  </div>;
+        <div className="grid min-h-0 flex-1 gap-4 md:grid-cols-[15rem_minmax(0,1fr)]">
+          <div className="flex min-h-0 flex-col rounded-xl border border-outline-variant/30 bg-background-container-low p-3">
+            <div className="mb-3 flex shrink-0 items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold">Group order</h3>
+              <span className="text-xs text-on-surface-variant">{groups.length} groups</span>
+            </div>
+            <label className="mb-3 grid gap-2 text-sm md:hidden">Selected group
+              <SelectInput value={activeIndex} onChange={value => setActiveIndex(Number(value))} disabled={busy}>
+                {groups.map((group, index) => <option key={index} value={index}>{index + 1}. {group.name || "New group"}</option>)}
+              </SelectInput>
+            </label>
+            <nav aria-label="Profile groups" className="hidden min-h-0 flex-1 space-y-1 overflow-y-auto md:block">
+              {groups.map((group, index) => <button key={index} type="button" disabled={busy} aria-pressed={activeIndex === index}
+                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm ${activeIndex === index ? "bg-primary-dim text-on-surface" : "text-on-surface-variant hover:bg-background-container-high hover:text-on-surface"}`}
+                onClick={() => setActiveIndex(index)}>
+                <span className="w-5 shrink-0 text-xs opacity-70">{String(index + 1).padStart(2, "0")}</span>
+                <span className="truncate">{group.name || "New group"}</span>
+              </button>)}
+            </nav>
+            <div className="mt-3 grid shrink-0 gap-2 border-t border-outline-variant/30 pt-3">
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" className={secondaryButtonClass} disabled={busy || !activeIndex} onClick={() => move(-1)}>Move up</button>
+                <button type="button" className={secondaryButtonClass} disabled={busy || activeIndex >= groups.length - 1} onClick={() => move(1)}>Move down</button>
+              </div>
+              <button type="button" className={secondaryButtonClass} disabled={busy || groups.length >= 30} onClick={add}>Add group</button>
+            </div>
+          </div>
+          {activeGroup && <fieldset disabled={busy} className="flex min-h-0 min-w-0 flex-col gap-4 rounded-xl border border-outline-variant/30 p-4 md:overflow-y-auto">
+            <label className="grid shrink-0 gap-2 text-sm">Group name
+              <TextInput value={activeGroup.name} onChange={value => update({ name: value })} required maxLength={40} readOnly={activeGroup.locked} />
+            </label>
+            <label className="flex min-h-0 flex-1 flex-col gap-2 text-sm">
+              {current?.grocery ? "Additional item matches" : "Item matches"}
+              <textarea className="min-h-32 w-full flex-1 resize-y rounded-lg border border-outline-variant/30 bg-background-container-high p-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary md:resize-none"
+                value={activeGroup.matches} onChange={event => update({ matches: event.target.value })} />
+            </label>
+            <p className="shrink-0 text-xs leading-relaxed text-on-surface-variant">
+              {current?.grocery ? "The built-in grocery matcher still applies. Add extra exact item names here, one per line." : "Enter one exact item name per line. Items without a match go to Other."}
+            </p>
+            {!activeGroup.locked && <div className="shrink-0"><button type="button" className={dangerButtonClass} onClick={remove}>Remove group</button></div>}
+          </fieldset>}
+        </div>
+      </>}
+    </div>
+    <div className="mt-4 flex shrink-0 items-center justify-end gap-2 border-t border-outline-variant/30 pt-4">
+      <button type="button" className={secondaryButtonClass} disabled={busy} onClick={cancel}>Cancel</button>
+      <button className={primaryButtonClass} disabled={busy || !profiles}>{busy ? "Saving…" : "Save changes"}</button>
+    </div>
+  </form>;
 }
 
 function ToDoSettings({ close }: { close: () => void }) {
   const [tab, setTab] = useState("Grouping profiles");
-  return <SettingsDialog title="To Do settings" tabs={["Grouping profiles", "Sync defaults"]} selected={tab} select={setTab} close={close}>
-    {tab === "Grouping profiles" ? <GroupingProfiles /> : <PollingSettings />}
+  const [busy, setBusy] = useState(false);
+  const dismiss = () => { if (!busy) close(); };
+  return <SettingsDialog title="To Do settings" tabs={["Grouping profiles", "Sync defaults"]} selected={tab} select={value => { if (!busy) setTab(value); }} close={dismiss} wide={tab === "Grouping profiles"}>
+    {tab === "Grouping profiles" ? <GroupingProfiles cancel={dismiss} onBusy={setBusy} /> : <PollingSettings />}
   </SettingsDialog>;
 }
 
