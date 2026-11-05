@@ -156,8 +156,7 @@ function MicrosoftSettings() {
   const signInError = reason === "session"
     ? "The Microsoft sign-in session expired or did not match. Start again from Connect Microsoft in this tab."
     : "Microsoft sign-in failed." + (/^AADSTS[0-9]{4,10}$/.test(reason) ? " Microsoft error " + reason + "." : "") + " Try connecting again.";
-  return <Page className="space-y-5">
-    <PageHeader title="Settings" />
+  return <div className="space-y-5">
     {(error || (outcome && !savedSecret)) && <ErrorBanner message={error || (outcome === "wrong-account" ? "Reconnect using the Microsoft account that owns your enrolled lists." : signInError)} />}
     <SectionCard title="Microsoft connection" description="Connect the Microsoft account that owns your shared shopping list.">
       {connection && <>
@@ -183,21 +182,47 @@ function MicrosoftSettings() {
         </details>}
       </>}
     </SectionCard>
-  </Page>;
+  </div>;
 }
 
 function Settings({ build }: { build: BuildInfo }) {
-  const [params] = useSearchParams();
-  if (params.get("tab") !== "about") return <MicrosoftSettings />;
-  return <Page className="space-y-5">
-    <PageHeader title="About GraphRelay"><Link className={secondaryButtonClass} to="/settings">Back to Settings</Link></PageHeader>
-    <SectionCard title="Build information">
+  const [params, setParams] = useSearchParams();
+  const [busy, setBusy] = useState(false);
+  const tabs = [{ id: "general", label: "General" }, { id: "todo", label: "To Do" }, { id: "about", label: "About" }];
+  const tab = tabs.some(value => value.id === params.get("tab")) ? params.get("tab")! : "general";
+  const section = params.get("section") === "groupings" ? "groupings" : "general";
+  function selectTab(value: string) {
+    if (busy) return;
+    setParams(value === "todo" ? { tab: value, section } : { tab: value });
+  }
+  return <Page>
+    <PageHeader title="Settings" />
+    <div className="mb-6 md:hidden">
+      <select aria-label="Settings section" value={tab} onChange={event => selectTab(event.target.value)} disabled={busy}
+        className="w-full rounded-xl border border-outline-variant/20 bg-background-container-high px-4 py-2.5 text-sm font-medium text-on-surface focus:border-primary/50 focus:outline-none">
+        {tabs.map(value => <option key={value.id} value={value.id}>{value.label}</option>)}
+      </select>
+    </div>
+    <nav aria-label="Settings sections" className="mb-6 hidden rounded-xl bg-background-container-high p-1 md:flex">
+      {tabs.map(value => <button key={value.id} type="button" disabled={busy} aria-pressed={tab === value.id} onClick={() => selectTab(value.id)}
+        className={`flex-1 whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-all ${tab === value.id ? "bg-background-container text-on-surface shadow-sm" : "text-on-surface-variant hover:text-on-surface"}`}>{value.label}</button>)}
+    </nav>
+    {tab === "general" && <MicrosoftSettings />}
+    {tab === "todo" && <>
+      <nav aria-label="To Do settings sections" className="mb-6 flex w-fit max-w-full gap-1 rounded-xl bg-background-container-high p-1">
+        {[{ id: "general", label: "General" }, { id: "groupings", label: "Groupings" }].map(value => <button key={value.id} type="button" disabled={busy} aria-pressed={section === value.id}
+          onClick={() => { if (!busy) setParams({ tab: "todo", section: value.id }); }}
+          className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-all ${section === value.id ? "bg-background-container text-on-surface shadow-sm" : "text-on-surface-variant hover:text-on-surface"}`}>{value.label}</button>)}
+      </nav>
+      {section === "general" ? <PollingSettings /> : <GroupingProfiles onBusy={setBusy} />}
+    </>}
+    {tab === "about" && <SectionCard title="Build information">
       <dl className="grid gap-3 text-sm">
         <div><dt className="text-on-surface-variant">Version</dt><dd>v{build.version}</dd></div>
         <div><dt className="text-on-surface-variant">Channel</dt><dd className="capitalize">{build.channel}</dd></div>
         <div><dt className="text-on-surface-variant">Revision</dt><dd className="break-all font-mono">{build.revision}</dd></div>
       </dl>
-    </SectionCard>
+    </SectionCard>}
   </Page>;
 }
 
@@ -297,13 +322,13 @@ function runStatus(list: List) {
 
 type GroupingProfile = { id: string; name: string; grocery: boolean; usedBy: number; groups: MatchGroup[] };
 
-function SettingsDialog({ title, tabs, selected, select, close, wide = false, children }: {
-  title: string; tabs: string[]; selected: string; select: (tab: string) => void; close: () => void; wide?: boolean; children: ReactNode;
+function SettingsDialog({ title, tabs, selected, select, close, children }: {
+  title: string; tabs: string[]; selected: string; select: (tab: string) => void; close: () => void; children: ReactNode;
 }) {
   const id = useId();
   const ref = useDialogA11y<HTMLDivElement>(true, close);
   return <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm" onClick={close}>
-    <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={id} className={`w-full rounded-2xl border border-outline-variant/20 bg-background-container p-4 shadow-xl sm:p-6 ${wide ? "flex h-[90dvh] max-h-[52rem] max-w-5xl flex-col overflow-hidden" : "max-h-[90dvh] max-w-2xl overflow-y-auto"}`} onClick={event => event.stopPropagation()}>
+    <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={id} className="max-h-[90dvh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-outline-variant/20 bg-background-container p-4 shadow-xl sm:p-6" onClick={event => event.stopPropagation()}>
       <div className="mb-4 flex shrink-0 items-center justify-between gap-2">
         <h2 id={id} className="font-headline text-lg font-semibold">{title}</h2>
         <button type="button" aria-label="Close settings" data-overlay-initial-focus onClick={close} className="rounded-lg p-1.5 text-on-surface-variant hover:bg-background-container-high hover:text-on-surface"><X size={18} /></button>
@@ -443,7 +468,7 @@ const profileCollision: CollisionDetection = args => args.active.data.current?.k
   ? args.pointerCoordinates ? pointerWithin(args) : rectIntersection(args)
   : closestCenter(args);
 
-function GroupingProfiles({ cancel, onBusy }: { cancel: () => void; onBusy: (busy: boolean) => void }) {
+function GroupingProfiles({ onBusy }: { onBusy: (busy: boolean) => void }) {
   const [profiles, setProfiles] = useState<GroupingProfile[]>();
   const [selected, setSelected] = useState("");
   const [activeId, setActiveId] = useState("");
@@ -531,7 +556,7 @@ function GroupingProfiles({ cancel, onBusy }: { cancel: () => void; onBusy: (bus
     moveTo(item, activeGroup.id);
     setItemName(""); setAddingItem(false);
   }
-  return <form onSubmit={save} className="flex min-h-0 flex-1 flex-col">
+  return <form onSubmit={save} className="flex h-[calc(100dvh-17rem)] min-h-[28rem] flex-col rounded-xl border border-outline-variant/30 bg-background-container p-4 sm:p-5">
     <div className="min-h-0 flex-1 overflow-y-auto md:flex md:flex-col md:overflow-hidden">
       {error && <ErrorBanner message={error} />}
       {notice && <p role="status" className="mb-3 text-sm text-success">{notice}</p>}
@@ -586,19 +611,10 @@ function GroupingProfiles({ cancel, onBusy }: { cancel: () => void; onBusy: (bus
       </>}
     </div>
     <div className="mt-4 flex shrink-0 items-center justify-end gap-2 border-t border-outline-variant/30 pt-4">
-      <button type="button" className={secondaryButtonClass} disabled={busy} onClick={cancel}>Cancel</button>
+      <button type="button" className={secondaryButtonClass} disabled={busy} onClick={() => choose(selected)}>Cancel</button>
       <button className={primaryButtonClass} disabled={busy || !profiles}>{busy ? "Saving…" : "Save changes"}</button>
     </div>
   </form>;
-}
-
-function ToDoSettings({ close }: { close: () => void }) {
-  const [tab, setTab] = useState("Grouping profiles");
-  const [busy, setBusy] = useState(false);
-  const dismiss = () => { if (!busy) close(); };
-  return <SettingsDialog title="To Do settings" tabs={["Grouping profiles", "Sync defaults"]} selected={tab} select={value => { if (!busy) setTab(value); }} close={dismiss} wide={tab === "Grouping profiles"}>
-    {tab === "Grouping profiles" ? <GroupingProfiles cancel={dismiss} onBusy={setBusy} /> : <PollingSettings />}
-  </SettingsDialog>;
 }
 
 type DuplicateCopy = { id: string; title: string; completed: boolean; date?: string; flags: string[] };
@@ -841,7 +857,6 @@ function EnrolledList({ lists, refresh }: { lists: List[]; refresh: () => Promis
 }
 
 function ToDo() {
-  const [settings, setSettings] = useState(false);
   const [lists, setLists] = useState<List[]>();
   const [error, setError] = useState("");
   async function refresh() {
@@ -862,7 +877,7 @@ function ToDo() {
     {error && <Page><ErrorBanner message={error} /></Page>}
     <Routes>
       <Route index element={<Page className="space-y-5">
-        <PageHeader title="To Do"><button className={secondaryButtonClass} onClick={() => setSettings(true)}>To Do settings</button><Link className={primaryButtonClass} to="/todo/enroll">Enroll a list</Link></PageHeader>
+        <PageHeader title="To Do"><Link className={secondaryButtonClass} to="/settings?tab=todo&section=general">To Do settings</Link><Link className={primaryButtonClass} to="/todo/enroll">Enroll a list</Link></PageHeader>
         <SectionCard title="Enrolled lists">
           {enrolled.length ? <ul className="grid gap-2">
             {enrolled.map(list => <li key={list.id}>
@@ -874,7 +889,6 @@ function ToDo() {
           </ul> : <p>No lists enrolled yet.</p>}
         </SectionCard>
         <AvailableLists />
-        {settings && <ToDoSettings close={() => { setSettings(false); void refresh(); }} />}
       </Page>} />
       <Route path="enroll" element={<EnrollList refresh={refresh} />} />
       <Route path=":listId" element={<EnrolledList lists={lists} refresh={refresh} />} />
