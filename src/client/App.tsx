@@ -11,21 +11,11 @@ import Layout, { type BuildInfo } from "./components/Layout";
 import { ErrorBanner, Page, PageHeader, PageLoading } from "./components/Page";
 import { dangerButtonClass, SectionCard, SelectInput, SettingRow, SettingToggle, TextInput, primaryButtonClass, secondaryButtonClass } from "./components/FormControls";
 
-async function api<T>(path: string, method = "GET", body?: object): Promise<T> {
-  const response = await fetch("/api" + path, {
-    method,
-    headers: { "Content-Type": "application/json", "X-GraphRelay": "1" },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (!response.ok) {
-    const details = await response.json().catch(() => null);
-    throw new Error(details?.error ?? (response.status === 401 ? "Sign-in failed or your session expired." : "Request failed (" + response.status + ")."));
-  }
-  return response.status === 204 ? undefined as T : await response.json() as T;
-}
+import { api } from "./lib/api";
+import CalendarFeeds from "./CalendarFeeds";
 
 type Session = { configured: boolean } & ({ signedIn: false } | { signedIn: true; build: BuildInfo });
-type Connection = { account: string | null; redirectUri: string; clientId: string | null; editable: boolean };
+type Connection = { account: string | null; calendarAccess: boolean; redirectUri: string; clientId: string | null; editable: boolean };
 type List = {
   id: string; displayName: string; isShared: boolean; isOwner: boolean;
   enrolled: boolean; mode: string; order: string[]; lastRun?: string; error?: string;
@@ -140,11 +130,11 @@ function MicrosoftSettings() {
   useEffect(() => {
     void api<Connection>("/microsoft").then(value => { setConnection(value); setClientId(value.clientId ?? ""); }).catch(error => setError(error.message));
   }, []);
-  async function connect() {
+  async function connect(calendarAccess = false) {
     setBusy(true);
     setError("");
     try {
-      const { url } = await api<{ url: string }>("/microsoft/connect", "POST");
+      const { url } = await api<{ url: string }>("/microsoft/connect", "POST", { calendarAccess });
       window.location.assign(url);
     } catch (error) {
       setError((error as Error).message);
@@ -157,8 +147,8 @@ function MicrosoftSettings() {
     ? "The Microsoft sign-in session expired or did not match. Start again from Connect Microsoft in this tab."
     : "Microsoft sign-in failed." + (/^AADSTS[0-9]{4,10}$/.test(reason) ? " Microsoft error " + reason + "." : "") + " Try connecting again.";
   return <div className="space-y-5">
-    {(error || (outcome && !savedSecret)) && <ErrorBanner message={error || (outcome === "wrong-account" ? "Reconnect using the Microsoft account that owns your enrolled lists." : signInError)} />}
-    <SectionCard title="Microsoft Connection" description="Connect the Microsoft account that owns your shared shopping list.">
+    {(error || (outcome && !savedSecret)) && <ErrorBanner message={error || (outcome === "wrong-account" ? "Reconnect using the Microsoft account that owns your enrolled lists or calendar feeds." : signInError)} />}
+    <SectionCard title="Microsoft Connection" description="Connect the Microsoft account for your To Do lists and calendars.">
       {connection && <>
         <SettingRow label="Account" action>
           <button className={primaryButtonClass} onClick={() => void connect()} disabled={busy || !connection.clientId}>
@@ -166,6 +156,11 @@ function MicrosoftSettings() {
           </button>
         </SettingRow>
         {connection.account && <p>Connected as {connection.account}</p>}
+        <SettingRow label="Calendar Access" hint="Allow GraphRelay to read events for subscription feeds." action>
+          {connection.calendarAccess
+            ? <Link className={secondaryButtonClass} to="/calendar">Open Calendar Feeds</Link>
+            : <button className={secondaryButtonClass} onClick={() => void connect(true)} disabled={busy || !connection.clientId}>Enable Calendar Access</button>}
+        </SettingRow>
         <p className="break-all text-sm text-on-surface-variant">Redirect URI · {connection.redirectUri}</p>
         {connection.editable && <details open={!connection.clientId || outcome === "failed"}>
           <summary className="cursor-pointer text-sm">Microsoft App Credentials</summary>
@@ -973,7 +968,7 @@ export default function App() {
     <Routes>
       <Route path="/dashboard" element={<Page><PageHeader title="Dashboard" /><SectionCard title="Microsoft Account Companion" description="Manage Microsoft To Do lists and calendar subscriptions."><Link className={primaryButtonClass} to="/settings">Microsoft Connection</Link></SectionCard></Page>} />
       <Route path="/todo/*" element={<ToDo />} />
-      <Route path="/calendar" element={<Page><PageHeader title="Calendar Feeds" /><SectionCard title="Calendar Feeds" description="The ms-ical integration is planned for a later milestone." /></Page>} />
+      <Route path="/calendar" element={<CalendarFeeds />} />
       <Route path="/settings" element={<Settings build={session.build} />} />
       <Route path="*" element={<Navigate replace to="/dashboard" />} />
     </Routes>
