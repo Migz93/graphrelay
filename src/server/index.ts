@@ -5,7 +5,8 @@ import { ConfidentialClientApplication, CryptoProvider } from "@azure/msal-node"
 import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { groceryAisle } from "./groceries.js";
+import { groceryItems, groceryProductName } from "./groceries.js";
+import { GroupingStore, type Profile } from "./grouping-store.js";
 import { duplicateGroups } from "./duplicates.js";
 import { aisles, itemKey, planTitles, type Mode } from "./ordering.js";
 
@@ -175,15 +176,18 @@ function log(listId: string, message: string) {
 function taskPath(listId: string) {
   return "me/todo/lists/" + encodeURIComponent(listId) + "/tasks";
 }
-type Profile = { id: string; name: string; groups: { name: string; matches: string[] }[]; grocery: boolean };
 const profileKey = (id: string) => "list-profile:" + id;
 const intervalKey = (id: string) => "list-interval:" + id;
 const builtInProfile: Profile = { id: "groceries", name: "Groceries", grocery: true, groups: aisles.map(name => ({ name, matches: [] })) };
+const groupingStore = new GroupingStore(resolve(dataDir, "todo", "groupings"));
 function profiles(): Profile[] {
-  return JSON.parse(read("grouping-profiles") ?? JSON.stringify([builtInProfile]));
+  return groupingStore.read();
 }
 function listProfile(list: Enrolled): Profile {
-  return profiles().find(profile => profile.id === (read(profileKey(list.id)) ?? "groceries")) ?? builtInProfile;
+  const id = read(profileKey(list.id)) ?? "groceries";
+  const profile = profiles().find(profile => profile.id === id);
+  if (!profile) throw new Error("Grouping profiles: the profile selected for this list is missing.");
+  return profile;
 }
 function migrateProfiles() {
   if (read("grouping-profiles")) return;
@@ -200,6 +204,23 @@ function migrateProfiles() {
   })();
 }
 migrateProfiles();
+if (!read("grouping-files-migrated")) {
+  const existing = new Set(groupingStore.read().map(profile => profile.id));
+  const legacy = JSON.parse(read("grouping-profiles")!) as Profile[];
+  for (const profile of legacy) {
+    if (existing.has(profile.id)) continue;
+    groupingStore.save({
+      ...profile,
+      ignoreQuantities: profile.grocery,
+      groups: profile.groups.map(group => ({
+        ...group,
+        defaultMatches: profile.grocery ? groceryItems[group.name] ?? [] : undefined,
+        prefixes: profile.grocery ? group.name === "Frozen" ? ["frozen"] : group.name === "Pantry" ? ["tinned", "canned"] : [] : undefined,
+      })),
+    });
+  }
+  write("grouping-files-migrated", "1");
+}
 
 function planList(list: Enrolled, tasks: Task[], recoverTitles = false) {
   const stored = db.prepare("SELECT task_id, base, applied FROM titles WHERE list_id = ?").all(list.id) as { task_id: string; base: string; applied: string }[];
@@ -222,7 +243,14 @@ function planList(list: Enrolled, tasks: Task[], recoverTitles = false) {
   const order = profile.groups.map(group => group.name);
   const corrections = new Map(rows.filter(row => order.includes(row.group_name)).map(row => [row.item_key, row.group_name]));
   const matches = new Map(profile.groups.flatMap(group => group.matches.map(match => [match, group.name] as const)));
-  return planTitles(tasks, list.mode, order, originals, corrections, name => matches.get(name) ?? (profile.grocery ? groceryAisle(name) : "Other"));
+  const defaults = new Map(profile.groups.flatMap(group => (group.defaultMatches ?? []).map(match => [match, group.name] as const)));
+  return planTitles(tasks, list.mode, order, originals, corrections, name => {
+    const explicit = matches.get(name);
+    if (explicit) return explicit;
+    const product = profile.ignoreQuantities ? groceryProductName(name) : name;
+    const prefix = profile.groups.find(group => group.prefixes?.some(prefix => product.startsWith(prefix + " ")));
+    return prefix?.name ?? defaults.get(product) ?? "Other";
+  });
 }
 async function run(list: Enrolled, includeCleanup = false) {
   if (active.has(list.id) || read(unenrollKey(list.id))) return;
@@ -505,8 +533,16 @@ app.put("/api/grouping-profiles/:id", (req, res) => {
     res.status(400).json({ error: "Keep the Other group and use each group name and item match only once." });
     return;
   }
-  const profile = { id: existing?.id ?? randomBytes(12).toString("hex"), grocery: existing?.grocery ?? false, name: name.trim(), groups: normalized };
-  write("grouping-profiles", JSON.stringify(existing ? values.map(value => value.id === existing.id ? profile : value) : [...values, profile]));
+  const profile: Profile = {
+    id: existing?.id ?? randomBytes(12).toString("hex"),
+    grocery: existing?.grocery ?? false, ignoreQuantities: existing?.ignoreQuantities ?? false,
+    name: name.trim(),
+    groups: normalized.map(group => {
+      const previous = existing?.groups.find(value => value.name === group.name);
+      return { ...group, defaultMatches: previous?.defaultMatches, prefixes: previous?.prefixes };
+    }),
+  };
+  groupingStore.save(profile);
   res.json(profile);
 });
 app.post("/api/lists/:id/enroll", async (req, res) => {
@@ -789,7 +825,7 @@ const client = resolve("dist/client");
 app.use(express.static(client));
 app.get(/.*/, (_req, res) => { res.sendFile(resolve(client, "index.html")); });
 const handleError: express.ErrorRequestHandler = (error: Error, _req, res, _next) => {
-  const message = error.message.startsWith("Microsoft Graph returned") || error.message.startsWith("Run failed")
+  const message = error.message.startsWith("Microsoft Graph returned") || error.message.startsWith("Run failed") || error.message.startsWith("Grouping profiles:")
     ? error.message : "Request failed. Check your Microsoft connection and try again.";
   res.status(502).json({ error: message });
 };

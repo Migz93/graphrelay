@@ -1,4 +1,4 @@
-const aisleItems: Record<string, string[]> = {
+export const groceryItems: Record<string, string[]> = {
   Produce: [
     "apple", "apples", "banana", "bananas", "carrot", "carrots", "onion", "onions",
     "spring onion", "spring onions", "mushroom", "mushrooms", "pepper", "peppers", "bell peppers",
@@ -33,14 +33,18 @@ const aisleItems: Record<string, string[]> = {
   ],
 };
 
-const groceries = new Map(Object.entries(aisleItems).flatMap(([aisle, items]) => items.map(item => [item, aisle] as const)));
+const groceries = new Map(Object.entries(groceryItems).flatMap(([aisle, items]) => items.map(item => [item, aisle] as const)));
 
-export function groceryAisle(name: string) {
+export function groceryProductName(name: string) {
   // Sizes and counts are ignored for aisle matching only.
-  const product = name
+  return name
     .replace(/^\d+\s*[x×]\s*(?=\p{L})/u, "")
     .replace(/\s*(?:[x×]\s*\d+|\d+(?:[.,]\d+)?\s*(?:kg|g|ml|cl|l)|\d+\s*[- ]?pack)$/u, "")
     .trim();
+}
+
+export function groceryAisle(name: string) {
+  const product = groceryProductName(name);
   if (/^frozen\s+\S/.test(product)) return "Frozen";
   if (/^(?:tinned|canned)\s+\S/.test(product)) return "Pantry";
   return groceries.get(product) ?? "Other";
