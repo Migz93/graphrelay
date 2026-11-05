@@ -1,3 +1,4 @@
+import { profileMatcher } from "./profile-matcher.js";
 import express from "express";
 import session from "express-session";
 import Database from "better-sqlite3";
@@ -5,7 +6,7 @@ import { ConfidentialClientApplication, CryptoProvider } from "@azure/msal-node"
 import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { groceryItems, groceryProductName } from "./groceries.js";
+import { groceryItems } from "./groceries.js";
 import { GroupingStore, type Profile } from "./grouping-store.js";
 import { duplicateGroups } from "./duplicates.js";
 import { aisles, itemKey, planTitles, type Mode } from "./ordering.js";
@@ -242,15 +243,7 @@ function planList(list: Enrolled, tasks: Task[], recoverTitles = false) {
   ) as { item_key: string; group_name: string }[];
   const order = profile.groups.map(group => group.name);
   const corrections = new Map(rows.filter(row => order.includes(row.group_name)).map(row => [row.item_key, row.group_name]));
-  const matches = new Map(profile.groups.flatMap(group => group.matches.map(match => [match, group.name] as const)));
-  const defaults = new Map(profile.groups.flatMap(group => (group.defaultMatches ?? []).map(match => [match, group.name] as const)));
-  return planTitles(tasks, list.mode, order, originals, corrections, name => {
-    const explicit = matches.get(name);
-    if (explicit) return explicit;
-    const product = profile.ignoreQuantities ? groceryProductName(name) : name;
-    const prefix = profile.groups.find(group => group.prefixes?.some(prefix => product.startsWith(prefix + " ")));
-    return prefix?.name ?? defaults.get(product) ?? "Other";
-  });
+  return planTitles(tasks, list.mode, order, originals, corrections, profileMatcher(profile));
 }
 async function run(list: Enrolled, includeCleanup = false) {
   if (active.has(list.id) || read(unenrollKey(list.id))) return;
