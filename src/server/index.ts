@@ -830,7 +830,10 @@ app.get("/api/lists/:id/duplicates", (req, res) => {
 
 type ProposedDuplicate = { id: string; keepId: string; key: string; completed: boolean; keepCompleted: boolean };
 
-async function removeDuplicates(list: Enrolled, proposed?: ProposedDuplicate[]) {
+type DuplicateRemovalProgress = { operationId: string; processed: number; total: number };
+const duplicateRemovalProgress = new Map<string, DuplicateRemovalProgress>();
+
+async function removeDuplicates(list: Enrolled, proposed?: ProposedDuplicate[], progress?: DuplicateRemovalProgress) {
   const path = taskPath(list.id);
   const groups = new Map(duplicateGroups(planList(list, await collection<Task>(path))).map(group => [group.key, group]));
   const proposals = proposed ?? [...groups.values()].flatMap(group => group.copies.map(copy => ({
@@ -842,17 +845,17 @@ async function removeDuplicates(list: Enrolled, proposed?: ProposedDuplicate[]) 
   let skipped = 0;
   let failed = 0;
   for (const request of requests.values()) {
-    const group = groups.get(request.key);
-    const copy = group?.copies.find(task => task.id === request.id);
-    if (!group || !copy || group.keep.id !== request.keepId
-      || (group.keep.status === "completed") !== request.keepCompleted
-      || (copy.status === "completed") !== request.completed) {
-      skipped++;
-      continue;
-    }
-    const copyPath = path + "/" + encodeURIComponent(copy.id);
-    const keepPath = path + "/" + encodeURIComponent(group.keep.id);
     try {
+      const group = groups.get(request.key);
+      const copy = group?.copies.find(task => task.id === request.id);
+      if (!group || !copy || group.keep.id !== request.keepId
+        || (group.keep.status === "completed") !== request.keepCompleted
+        || (copy.status === "completed") !== request.completed) {
+        skipped++;
+        continue;
+      }
+      const copyPath = path + "/" + encodeURIComponent(copy.id);
+      const keepPath = path + "/" + encodeURIComponent(group.keep.id);
       if (detailFlags(copy).length || (await checklistFlags(copyPath)).length) {
         skipped++;
         continue;
@@ -869,10 +872,19 @@ async function removeDuplicates(list: Enrolled, proposed?: ProposedDuplicate[]) 
       log(list.id, (proposed ? "Removed duplicate: " : "Automatically removed duplicate: ") + latestCopy.title);
     } catch {
       failed++;
+    } finally {
+      if (progress) progress.processed++;
     }
   }
   return { removed, skipped, failed };
 }
+
+app.get("/api/lists/:id/duplicates/progress", (req, res) => {
+  const progress = duplicateRemovalProgress.get(req.params.id);
+  res.json(progress && progress.operationId === req.query.operationId
+    ? { processed: progress.processed, total: progress.total }
+    : null);
+});
 
 app.post(duplicateRemovalPath, async (req, res) => {
   const list = knownList(req.params.id);
@@ -888,12 +900,19 @@ app.post(duplicateRemovalPath, async (req, res) => {
     res.status(409).json({ error: "Wait for the current list run or finish unenrolling it, then try again." });
     return;
   }
+  const operationId = req.body.operationId;
+  const copies = proposed as ProposedDuplicate[];
+  const progress = typeof operationId === "string"
+    ? { operationId, processed: 0, total: new Set(copies.map(copy => copy.id)).size }
+    : undefined;
   active.add(list.id);
+  if (progress) duplicateRemovalProgress.set(list.id, progress);
   try {
-    const result = await removeDuplicates(list, proposed as ProposedDuplicate[]);
+    const result = await removeDuplicates(list, copies, progress);
     if (result.removed) await syncSnapshot(list).catch(() => undefined);
     res.json(result);
   } finally {
+    duplicateRemovalProgress.delete(list.id);
     active.delete(list.id);
     schedulePoll();
   }

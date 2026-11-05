@@ -634,6 +634,8 @@ function GroupingProfiles({ onBusy }: { onBusy: (busy: boolean) => void }) {
 }
 
 type DuplicateCopy = { id: string; title: string; completed: boolean; date?: string; flags: string[] };
+type DuplicateProgress = { processed: number; total: number };
+
 type DuplicateGroup = { key: string; name: string; keep: DuplicateCopy; copies: DuplicateCopy[] };
 
 function DuplicatePreview({ path, onRemoved, onBusy }: { path: string; onRemoved: () => void; onBusy: (busy: boolean) => void }) {
@@ -642,25 +644,29 @@ function DuplicatePreview({ path, onRemoved, onBusy }: { path: string; onRemoved
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
-  const [removing, setRemoving] = useState(false);
+  const [removalId, setRemovalId] = useState<string>();
+  const [progress, setProgress] = useState<DuplicateProgress>();
+  const removing = removalId !== undefined;
   const [result, setResult] = useState("");
   const proposed = groups?.flatMap(group => group.copies.filter(copy => !copy.flags.length).map(copy => ({
     id: copy.id, key: group.key, keepId: group.keep.id, completed: copy.completed, keepCompleted: group.keep.completed,
   }))) ?? [];
   async function remove() {
-    setRemoving(true);
+    const operationId = crypto.getRandomValues(new Uint32Array(4)).join("-");
+    setProgress({ processed: 0, total: proposed.length });
+    setRemovalId(operationId);
     onBusy(true);
     setError("");
     setResult("");
     try {
-      const summary = await api<{ removed: number; skipped: number; failed: number }>(path + "/duplicates/remove", "POST", { proposed });
+      const summary = await api<{ removed: number; skipped: number; failed: number }>(path + "/duplicates/remove", "POST", { proposed, operationId });
       setResult(`Removed ${summary.removed} · Skipped ${summary.skipped} · Failed ${summary.failed}`);
       await load(false);
       if (summary.removed) onRemoved();
     } catch (error) {
       setError((error as Error).message);
     } finally {
-      setRemoving(false);
+      setRemovalId(undefined);
       onBusy(false);
       setConfirming(false);
     }
@@ -681,6 +687,25 @@ function DuplicatePreview({ path, onRemoved, onBusy }: { path: string; onRemoved
     }
   }
   useEffect(() => { void load(); }, [path]);
+  useEffect(() => {
+    if (!removalId) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    async function pollProgress() {
+      try {
+        const value = await api<DuplicateProgress | null>(path + "/duplicates/progress?operationId=" + removalId);
+        if (!stopped && value) setProgress(value);
+      } catch {
+        // The removal request reports the outcome independently of progress polling.
+      }
+      if (!stopped) timer = setTimeout(pollProgress, 750);
+    }
+    timer = setTimeout(pollProgress, 250);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+  }, [path, removalId]);
   return <div className="grid gap-4">
     <p className="text-sm text-on-surface-variant">GraphRelay keeps an open copy when possible. Review the proposed removals before applying them to Microsoft To Do.</p>
     <div className="flex flex-wrap gap-2">
@@ -694,7 +719,10 @@ function DuplicatePreview({ path, onRemoved, onBusy }: { path: string; onRemoved
         <button className={secondaryButtonClass} disabled={removing} onClick={() => setConfirming(false)}>Cancel</button>
       </div>
     </div>}
-    {removing && <p role="status">Removing eligible duplicates…</p>}
+    {removing && !result && progress && <div className="grid gap-2">
+      <p role="status">{progress.processed} of {progress.total} processed</p>
+      <progress aria-label="Duplicate Cleanup Progress" className="h-2 w-full accent-primary" value={progress.processed} max={progress.total} />
+    </div>}
     {result && <p role="status">{result}</p>}
     {error && <ErrorBanner message={error} />}
     {busy && <p role="status">Refreshing duplicates…</p>}
