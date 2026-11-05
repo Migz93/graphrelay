@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { ArrowDown, ArrowUp, Plus, X } from "lucide-react";
 import { useDialogA11y } from "./hooks/useDialogA11y";
 import { useEffect, useId, useState, type FormEvent, type ReactNode } from "react";
 import { Link, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -486,16 +486,22 @@ function GroupingProfiles({ cancel, onBusy }: { cancel: () => void; onBusy: (bus
           {current && <p className="text-sm text-on-surface-variant md:col-span-2">Used by {current.usedBy} {current.usedBy === 1 ? "list" : "lists"}.{current.grocery ? " Includes the built-in grocery matcher." : ""}</p>}
         </div>
         <div className="grid min-h-0 flex-1 gap-4 md:grid-cols-[15rem_minmax(0,1fr)]">
-          <div className="flex min-h-0 flex-col rounded-xl border border-outline-variant/30 bg-background-container-low p-3">
+          <div className="grid gap-2 md:hidden">
+            <label htmlFor="profile-mobile-group" className="text-sm">Selected group</label>
+            <div className="grid grid-cols-[minmax(0,1fr)_2.5rem_2.5rem_2.5rem] items-center gap-2">
+              <SelectInput id="profile-mobile-group" value={activeIndex} onChange={value => setActiveIndex(Number(value))} disabled={busy}>
+                {groups.map((group, index) => <option key={index} value={index}>{index + 1}. {group.name || "New group"}</option>)}
+              </SelectInput>
+              <button type="button" className={secondaryButtonClass} aria-label="Move up" title="Move up" disabled={busy || !activeIndex} onClick={() => move(-1)}><ArrowUp size={16} className="shrink-0" /></button>
+              <button type="button" className={secondaryButtonClass} aria-label="Move down" title="Move down" disabled={busy || activeIndex >= groups.length - 1} onClick={() => move(1)}><ArrowDown size={16} className="shrink-0" /></button>
+              <button type="button" className={secondaryButtonClass} aria-label="Add group" title="Add group" disabled={busy || groups.length >= 30} onClick={add}><Plus size={16} className="shrink-0" /></button>
+            </div>
+          </div>
+          <div className="hidden min-h-0 flex-col rounded-xl border border-outline-variant/30 bg-background-container-low p-3 md:flex">
             <div className="mb-3 flex shrink-0 items-center justify-between gap-2">
               <h3 className="text-sm font-semibold">Group order</h3>
               <span className="text-xs text-on-surface-variant">{groups.length} groups</span>
             </div>
-            <label className="mb-3 grid gap-2 text-sm md:hidden">Selected group
-              <SelectInput value={activeIndex} onChange={value => setActiveIndex(Number(value))} disabled={busy}>
-                {groups.map((group, index) => <option key={index} value={index}>{index + 1}. {group.name || "New group"}</option>)}
-              </SelectInput>
-            </label>
             <nav aria-label="Profile groups" className="hidden min-h-0 flex-1 space-y-1 overflow-y-auto md:block">
               {groups.map((group, index) => <button key={index} type="button" disabled={busy} aria-pressed={activeIndex === index}
                 className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm ${activeIndex === index ? "bg-primary-dim text-on-surface" : "text-on-surface-variant hover:bg-background-container-high hover:text-on-surface"}`}
@@ -506,8 +512,8 @@ function GroupingProfiles({ cancel, onBusy }: { cancel: () => void; onBusy: (bus
             </nav>
             <div className="mt-3 grid shrink-0 gap-2 border-t border-outline-variant/30 pt-3">
               <div className="grid grid-cols-2 gap-2">
-                <button type="button" className={secondaryButtonClass} disabled={busy || !activeIndex} onClick={() => move(-1)}>Move up</button>
-                <button type="button" className={secondaryButtonClass} disabled={busy || activeIndex >= groups.length - 1} onClick={() => move(1)}>Move down</button>
+                <button type="button" className={secondaryButtonClass + " whitespace-nowrap text-xs"} disabled={busy || !activeIndex} onClick={() => move(-1)}>Move up</button>
+                <button type="button" className={secondaryButtonClass + " whitespace-nowrap text-xs"} disabled={busy || activeIndex >= groups.length - 1} onClick={() => move(1)}>Move down</button>
               </div>
               <button type="button" className={secondaryButtonClass} disabled={busy || groups.length >= 30} onClick={add}>Add group</button>
             </div>
