@@ -55,7 +55,7 @@ function Login({ onLogin, firstRun = false }: { onLogin: () => void; firstRun?: 
     <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(229,9,20,0.18),transparent_32rem),linear-gradient(135deg,rgba(36,37,43,0.65),transparent_42rem)]" />
     <form onSubmit={submit} className="relative w-full max-w-md rounded-3xl border border-outline-variant/30 bg-background-container-low/90 p-8 shadow-2xl backdrop-blur">
       <div className="mb-8 flex items-center gap-3">
-        <img src="/graphrelay-logo.svg" alt="" aria-hidden="true" className="size-11 rounded-xl object-cover" />
+        <img src="/graphrelay-logo.svg" alt="" aria-hidden="true" className="size-11 object-contain" />
         <div>
           <h1 className="font-headline text-2xl font-bold text-on-surface">GraphRelay</h1>
           <p className="text-sm text-on-surface-variant">{firstRun ? "Create the admin password" : "Sign in to continue"}</p>
@@ -99,7 +99,7 @@ function PollingSettings() {
       setBusy(false);
     }
   }
-  return <SectionCard title="To Do Polling" description="Choose how often GraphRelay checks enrolled lists for changes.">
+  return <SectionCard title="To Do Polling" description="Choose how often GraphRelay caches all Microsoft To Do lists. Enrolled lists can override this interval.">
     {error && <ErrorBanner message={error} />}
     {!!options.length && <form className="grid gap-3" onSubmit={save}>
       <label className="grid gap-2 text-sm">Polling Interval
@@ -392,7 +392,7 @@ function ListSettings({ list, refresh, close }: { list: List; refresh: () => Pro
       {error && <ErrorBanner message={error} />}
       {list.unenrollPending && <p className="text-sm text-warning">Automatic runs are paused while unenrollment is unfinished. Use the Enrollment tab to retry.</p>}
       {tab === "Enrollment" && <div className="grid gap-4">
-        <p className="text-sm text-on-surface-variant">Unenroll this list to stop GraphRelay syncing and managing it. This removes its local settings and remembered corrections.</p>
+        <p className="text-sm text-on-surface-variant">Unenroll this list to stop its automatic actions. Its contents will still be cached on the default schedule. This removes its local settings and remembered corrections.</p>
         <label className="flex items-start gap-2 text-sm">
           <input type="checkbox" className="mt-1 accent-primary" checked={restorePrefixes} disabled={busy} onChange={event => setRestorePrefixes(event.target.checked)} />
           <span>Remove GraphRelay prefixes from open and completed items before unenrolling.</span>
@@ -875,7 +875,7 @@ function EnrollList({ refresh }: { refresh: () => Promise<void> }) {
         </SelectInput>
       </label>
     </SectionCard> : directory?.directoryReady && <p>All available lists are enrolled.</p>}
-    {list && <SectionCard title={list.displayName} description="Enrollment syncs the list into GraphRelay. You can enable automations later in List settings.">
+    {list && <SectionCard title={list.displayName} description="Enrollment lets you configure automatic actions and a custom sync interval in List Settings.">
       <button className={primaryButtonClass} disabled={enrolling} onClick={() => void enroll()}>{enrolling ? "Enrolling…" : "Enroll List"}</button>
     </SectionCard>}
   </Page>;
