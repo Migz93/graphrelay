@@ -14,7 +14,9 @@ GraphRelay encrypts the Microsoft configuration and token cache with a key store
 
 Create a disposable list in Microsoft To Do and share it with the other shopper. Enroll it from **To Do** to start reading its contents into GraphRelay. New enrollments start with grouping and automatic duplicate cleanup off.
 
-Open **List settings** for an enrolled list to choose a grouping profile and prefix style, enable automatic duplicate cleanup, or override the sync interval. To use grouping in Microsoft To Do, set the list to Alphabetical on each phone. Use **To Do settings** on the overview to edit shared grouping profiles and set the default sync interval. The built-in **Groceries** profile recognizes common aliases, storage labels and pack sizes. Custom profiles match the item names you enter. Corrections made beside an item apply to that list.
+Open **List settings** for an enrolled list to choose a grouping profile and prefix style, enable automatic duplicate cleanup, or override the sync interval. To use grouping in Microsoft To Do, set the list to Alphabetical on each phone. Use **To Do settings** on the overview to edit shared grouping profiles and set the default sync interval. Use the **Enrollment** tab to unenroll a list. Optionally restore GraphRelay-prefixed names on open and completed items first. If restoration fails, background runs pause until you retry unenrollment. The list's local settings and corrections are removed after unenrollment succeeds.
+
+Completed items appear in a collapsed section below the open items. The built-in **Groceries** profile recognizes common aliases, storage labels and pack sizes. Custom profiles match the item names you enter. Corrections made beside an item apply to that list.
 
 **Sync Now** runs the selected list immediately with its saved settings. **View activity** shows the changes. The dashboard reads enrolled lists, open items and duplicate previews from local storage. Background sync refreshes those snapshots.
 

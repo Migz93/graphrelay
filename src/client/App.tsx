@@ -24,7 +24,7 @@ type Connection = { account: string | null; redirectUri: string; clientId: strin
 type List = {
   id: string; displayName: string; isShared: boolean; isOwner: boolean;
   enrolled: boolean; mode: string; order: string[]; lastRun?: string; error?: string;
-  autoCleanup: boolean; profileId: string; syncMinutes: number | null;
+  unenrollPending?: boolean; autoCleanup: boolean; profileId: string; syncMinutes: number | null;
 };
 type Activity = { created: string; message: string };
 
@@ -191,7 +191,7 @@ function Settings({ build }: { build: BuildInfo }) {
 type ListItem = { id: string; name: string; aisle: string };
 
 function ItemAisles({ path, aisles, grouped, refresh }: { path: string; aisles: string[]; grouped: boolean; refresh: () => Promise<void> }) {
-  const [snapshot, setSnapshot] = useState<{ items: ListItem[]; syncedAt: string | null }>();
+  const [snapshot, setSnapshot] = useState<{ items: ListItem[]; completed: { id: string; name: string }[]; syncedAt: string | null }>();
   const items = snapshot?.items;
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -200,7 +200,7 @@ function ItemAisles({ path, aisles, grouped, refresh }: { path: string; aisles: 
     setBusy(true);
     setError("");
     try {
-      setSnapshot(await api<{ items: ListItem[]; syncedAt: string | null }>(path + "/items"));
+      setSnapshot(await api<{ items: ListItem[]; completed: { id: string; name: string }[]; syncedAt: string | null }>(path + "/items"));
     } catch (error) {
       setError((error as Error).message);
     } finally {
@@ -255,8 +255,8 @@ function ItemAisles({ path, aisles, grouped, refresh }: { path: string; aisles: 
         <h4 className="font-headline font-semibold">{aisle}</h4>
         <ul className="divide-y divide-outline-variant/30">
           {group.map(item => <li key={item.id}>
-            <label className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
-              <span className="break-all">{item.name}</span>
+            <label className="grid grid-cols-[minmax(0,1fr)_9rem] items-center gap-3 py-2 text-sm sm:grid-cols-[minmax(0,1fr)_12rem]">
+              <span className="min-w-0 break-words">{item.name}</span>
               <SelectInput aria-label={"Group for " + item.name} value={aisles.includes(item.aisle) ? item.aisle : "Other"} onChange={value => void change(item, value)} disabled={busy}>
                 {aisles.map(option => <option key={option} value={option}>{option}</option>)}
               </SelectInput>
@@ -265,6 +265,12 @@ function ItemAisles({ path, aisles, grouped, refresh }: { path: string; aisles: 
         </ul>
       </section>;
     })}
+    {snapshot?.syncedAt && <details className="rounded-lg border border-outline-variant/30 bg-background-container px-3 py-2">
+      <summary className="cursor-pointer py-1 text-sm font-medium">Completed items ({snapshot.completed?.length ?? 0})</summary>
+      {snapshot.completed?.length ? <ul className="mt-2 divide-y divide-outline-variant/30">
+        {[...snapshot.completed].sort((a, b) => a.name.localeCompare(b.name)).map(item => <li key={item.id} className="break-words py-2 text-sm text-on-surface-variant">{item.name}</li>)}
+      </ul> : <p className="py-2 text-sm text-on-surface-variant">No completed items.</p>}
+    </details>}
   </div>;
 }
 
@@ -298,7 +304,10 @@ function SettingsDialog({ title, tabs, selected, select, close, children }: {
 }
 
 function ListSettings({ list, refresh, close }: { list: List; refresh: () => Promise<void>; close: () => void }) {
-  const [tab, setTab] = useState("Grouping");
+  const navigate = useNavigate();
+  const [tab, setTab] = useState(list.unenrollPending ? "Enrollment" : "Grouping");
+  const [confirmUnenroll, setConfirmUnenroll] = useState(false);
+  const [restorePrefixes, setRestorePrefixes] = useState(list.mode !== "off" || !!list.unenrollPending);
   const [mode, setMode] = useState(list.mode);
   const [profileId, setProfileId] = useState(list.profileId);
   const [autoCleanup, setAutoCleanup] = useState(list.autoCleanup);
@@ -307,6 +316,21 @@ function ListSettings({ list, refresh, close }: { list: List; refresh: () => Pro
   const [polling, setPolling] = useState<{ minutes: number; options: number[] }>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  async function unenroll() {
+    setBusy(true);
+    setError("");
+    try {
+      await api("/lists/" + encodeURIComponent(list.id) + "/unenroll", "POST", { restorePrefixes });
+      await refresh();
+      close();
+      navigate("/todo", { replace: true });
+    } catch (error) {
+      setError((error as Error).message);
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
   useEffect(() => {
     void Promise.all([api<GroupingProfile[]>("/grouping-profiles"), api<{ minutes: number; options: number[] }>("/polling")])
       .then(([values, interval]) => { setProfiles(values); setPolling(interval); })
@@ -325,9 +349,24 @@ function ListSettings({ list, refresh, close }: { list: List; refresh: () => Pro
       setBusy(false);
     }
   }
-  return <SettingsDialog title={list.displayName + " settings"} tabs={["Grouping", "Duplicates", "Sync"]} selected={tab} select={setTab} close={() => { if (!busy) close(); }}>
+  return <SettingsDialog title={list.displayName + " settings"} tabs={["Grouping", "Duplicates", "Sync", "Enrollment"]} selected={tab} select={setTab} close={() => { if (!busy) close(); }}>
     <div className="grid gap-4">
       {error && <ErrorBanner message={error} />}
+      {list.unenrollPending && <p className="text-sm text-warning">Automatic runs are paused while unenrollment is unfinished. Use the Enrollment tab to retry.</p>}
+      {tab === "Enrollment" && <div className="grid gap-4">
+        <p className="text-sm text-on-surface-variant">Unenroll this list to stop GraphRelay syncing and managing it. This removes its local settings and remembered corrections.</p>
+        <label className="flex items-start gap-2 text-sm">
+          <input type="checkbox" className="mt-1 accent-primary" checked={restorePrefixes} disabled={busy} onChange={event => setRestorePrefixes(event.target.checked)} />
+          <span>Remove GraphRelay prefixes from open and completed items before unenrolling.</span>
+        </label>
+        {confirmUnenroll ? <>
+          <p className="text-sm">Unenroll {list.displayName}{restorePrefixes ? " and restore names where the GraphRelay prefix is still present" : " with the current Microsoft To Do titles"}?</p>
+          <div className="flex flex-wrap gap-2">
+            <button className={dangerButtonClass} disabled={busy} onClick={() => void unenroll()}>{busy ? "Unenrolling…" : "Confirm unenrollment"}</button>
+            <button className={secondaryButtonClass} disabled={busy} onClick={() => setConfirmUnenroll(false)}>Cancel</button>
+          </div>
+        </> : <div><button className={dangerButtonClass} disabled={busy} onClick={() => setConfirmUnenroll(true)}>Unenroll list</button></div>}
+      </div>}
       {tab === "Grouping" && <>
         <SettingToggle label="Group items" hint="Apply a grouping profile to this list. Use Alphabetical sort in Microsoft To Do." checked={mode !== "off"} onChange={enabled => setMode(enabled ? "named" : "off")} />
         {mode !== "off" && <>
@@ -351,7 +390,7 @@ function ListSettings({ list, refresh, close }: { list: List; refresh: () => Pro
           {polling?.options.map(minutes => <option key={minutes} value={minutes}>{minutes} min</option>)}
         </SelectInput>
       </label>}
-      <div><button className={primaryButtonClass} disabled={busy || !profiles || !polling} onClick={() => void save()}>{busy ? "Saving…" : "Save list settings"}</button></div>
+      {tab !== "Enrollment" && <div><button className={primaryButtonClass} disabled={busy || !!list.unenrollPending || !profiles || !polling} onClick={() => void save()}>{busy ? "Saving…" : "Save list settings"}</button></div>}
     </div>
   </SettingsDialog>;
 }
@@ -570,6 +609,7 @@ function ListDetail({ list, refresh }: { list: List; refresh: () => Promise<void
       <button className={secondaryButtonClass} disabled={loadingHistory} aria-expanded={!!history} onClick={() => void activity()}>{history ? "Hide activity" : "View activity"}</button>
     </PageHeader>
     <p className="text-sm text-on-surface-variant">{runStatus(list)}</p>
+    {list.unenrollPending && <p className="text-sm text-warning">Unenrollment is unfinished. Open List settings to retry.</p>}
     {syncNotice && <p role="status" className="text-sm text-success">{syncNotice}</p>}
     {(error || list.error) && <ErrorBanner message={error || list.error!} />}
     {history && <SectionCard title="Activity">

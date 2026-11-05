@@ -167,6 +167,7 @@ async function refreshDirectory() {
   }
 }
 const active = new Set<string>();
+const unenrollKey = (id: string) => "unenroll:" + id;
 function log(listId: string, message: string) {
   db.prepare("INSERT INTO activity (list_id, message) VALUES (?, ?)").run(listId, message);
   db.prepare("DELETE FROM activity WHERE list_id = ? AND id NOT IN (SELECT id FROM activity WHERE list_id = ? ORDER BY id DESC LIMIT 200)").run(listId, listId);
@@ -224,7 +225,7 @@ function planList(list: Enrolled, tasks: Task[], recoverTitles = false) {
   return planTitles(tasks, list.mode, order, originals, corrections, name => matches.get(name) ?? (profile.grocery ? groceryAisle(name) : "Other"));
 }
 async function run(list: Enrolled, includeCleanup = false) {
-  if (active.has(list.id)) return;
+  if (active.has(list.id) || read(unenrollKey(list.id))) return;
   active.add(list.id);
   try {
     const path = taskPath(list.id);
@@ -282,7 +283,7 @@ function schedulePoll(delay?: number) {
     const now = Date.now();
     const directoryDue = lastDirectoryPoll + pollingMinutes() * 60_000;
     const lists = db.prepare("SELECT id FROM lists").all() as { id: string }[];
-    const next = lists.reduce((due, { id }) => active.has(id) ? due : Math.min(due, (lastAttempts.get(id) ?? 0) + intervalMinutes(id) * 60_000), directoryDue);
+    const next = lists.reduce((due, { id }) => (active.has(id) || read(unenrollKey(id))) ? due : Math.min(due, (lastAttempts.get(id) ?? 0) + intervalMinutes(id) * 60_000), directoryDue);
     delay = msal && read("username") ? Math.max(0, next - now) : pollingMinutes() * 60_000;
   }
   pollTimer = setTimeout(pollLists, delay).unref();
@@ -298,7 +299,7 @@ async function pollLists() {
     }
     for (const { id } of db.prepare("SELECT id FROM lists").all() as { id: string }[]) {
       const list = enrolledList(id);
-      if (list && !active.has(id) && Date.now() >= (lastAttempts.get(id) ?? 0) + intervalMinutes(id) * 60_000) await run(list, true).catch(() => undefined);
+      if (list && !active.has(id) && !read(unenrollKey(id)) && Date.now() >= (lastAttempts.get(id) ?? 0) + intervalMinutes(id) * 60_000) await run(list, true).catch(() => undefined);
     }
     await directory;
   } finally {
@@ -463,7 +464,7 @@ app.get("/api/lists", (_req, res) => {
   const lists = enrolled.map(list => ({
     id: list.id, displayName: list.name, isShared: directory.get(list.id)?.isShared,
     enrolled: true, mode: list.mode, order: listProfile(list).groups.map(group => group.name), profileId: listProfile(list).id, syncMinutes: Number(read(intervalKey(list.id))) || null, autoCleanup: !!list.auto_cleanup,
-    lastRun: read("last:" + list.id), error: read("error:" + list.id),
+    unenrollPending: !!read(unenrollKey(list.id)), lastRun: read("last:" + list.id), error: read("error:" + list.id),
   }));
   res.json(lists);
 });
@@ -517,6 +518,55 @@ app.post("/api/lists/:id/enroll", async (req, res) => {
   schedulePoll(0);
   res.sendStatus(204);
 });
+app.post("/api/lists/:id/unenroll", async (req, res) => {
+  const list = enrolledList(req.params.id);
+  if (!list) { res.sendStatus(204); return; }
+  const { restorePrefixes } = req.body ?? {};
+  if (typeof restorePrefixes !== "boolean") {
+    res.status(400).json({ error: "Choose whether to restore item names." });
+    return;
+  }
+  if (active.has(list.id)) {
+    res.status(409).json({ error: "Wait for the current list run to finish, then try again." });
+    return;
+  }
+  active.add(list.id);
+  try {
+    write(unenrollKey(list.id), "pending");
+    if (restorePrefixes) {
+      const path = taskPath(list.id);
+      const tasks = await collection<Task>(path);
+      const restored = planList({ ...list, mode: "off" }, tasks);
+      for (const task of restored) {
+        if (task.title === task.next) continue;
+        const taskUrl = path + "/" + encodeURIComponent(task.id);
+        const current = await graph<Task>(taskUrl);
+        if (current.title !== task.title) continue;
+        await graph(taskUrl, { title: task.next });
+        db.transaction(() => {
+          db.prepare("DELETE FROM titles WHERE list_id = ? AND task_id = ?").run(list.id, task.id);
+          db.prepare("DELETE FROM pending_titles WHERE list_id = ? AND task_id = ?").run(list.id, task.id);
+        })();
+      }
+    }
+    db.transaction(() => {
+      db.prepare("DELETE FROM lists WHERE id = ?").run(list.id);
+      for (const table of ["titles", "pending_titles", "aisle_corrections", "group_corrections", "activity"]) {
+        db.prepare("DELETE FROM " + table + " WHERE list_id = ?").run(list.id);
+      }
+      for (const key of [unenrollKey(list.id), profileKey(list.id), intervalKey(list.id), "snapshot:" + list.id, "last:" + list.id, "error:" + list.id]) {
+        db.prepare("DELETE FROM state WHERE key = ?").run(key);
+      }
+    })();
+    lastAttempts.delete(list.id);
+    res.sendStatus(204);
+  } catch {
+    res.status(502).json({ error: "Unenrollment could not finish. Automatic runs are paused for this list. Retry unenrolling to continue, or turn off name restoration to keep the current titles." });
+  } finally {
+    active.delete(list.id);
+    schedulePoll();
+  }
+});
 app.put("/api/lists/:id", async (req, res) => {
   const list = enrolledList(req.params.id);
   if (!list) { res.sendStatus(404); return; }
@@ -526,7 +576,7 @@ app.put("/api/lists/:id", async (req, res) => {
     res.status(400).json({ error: "Choose a valid grouping profile, prefix style and sync interval." });
     return;
   }
-  if (active.has(list.id)) { res.status(409).json({ error: "Wait for the current run to finish." }); return; }
+  if (active.has(list.id) || read(unenrollKey(list.id))) { res.status(409).json({ error: "Wait for the current run or finish unenrolling this list." }); return; }
   db.transaction(() => {
     db.prepare("UPDATE lists SET mode = ?, auto_cleanup = ? WHERE id = ?").run(mode, Number(autoCleanup), list.id);
     write(profileKey(list.id), profileId);
@@ -542,8 +592,8 @@ function enrolledList(id: string) {
 app.post("/api/lists/:id/sync", async (req, res) => {
   const list = enrolledList(req.params.id);
   if (!list) { res.sendStatus(404); return; }
-  if (active.has(list.id)) {
-    res.status(409).json({ error: "This list is already syncing. Try again when it finishes." });
+  if (active.has(list.id) || read(unenrollKey(list.id))) {
+    res.status(409).json({ error: "This list is busy. Wait for the current run or finish unenrolling it." });
     return;
   }
   await run(list, true);
@@ -552,7 +602,7 @@ app.post("/api/lists/:id/sync", async (req, res) => {
 app.get("/api/lists/:id/items", (req, res) => {
   if (!enrolledList(req.params.id)) { res.sendStatus(404); return; }
   const snapshot = readSnapshot(req.params.id);
-  res.json({ items: snapshot?.items ?? [], syncedAt: snapshot?.syncedAt ?? null });
+  res.json({ items: snapshot?.items ?? [], completed: snapshot?.completed ?? [], syncedAt: snapshot?.syncedAt ?? null });
 });
 app.put("/api/lists/:id/items/:taskId/aisle", async (req, res) => {
   const { aisle, name } = req.body ?? {};
@@ -562,9 +612,17 @@ app.put("/api/lists/:id/items/:taskId/aisle", async (req, res) => {
   }
   const list = enrolledList(req.params.id);
   if (!list) { res.sendStatus(404); return; }
+  if (active.has(list.id) || read(unenrollKey(list.id))) {
+    res.status(409).json({ error: "Wait for the current run or finish unenrolling this list." });
+    return;
+  }
   const path = taskPath(list.id) + "/" + encodeURIComponent(req.params.taskId);
   const task = await graph<Task>(path);
-  const currentList = enrolledList(list.id)!;
+  const currentList = enrolledList(list.id);
+  if (!currentList || active.has(list.id) || read(unenrollKey(list.id))) {
+    res.status(409).json({ error: "The list settings changed. Refresh and try again." });
+    return;
+  }
   const profile = listProfile(currentList);
   if (currentList.mode === "off" || !profile.groups.some(group => group.name === aisle)) {
     res.status(409).json({ error: "Grouping settings changed. Refresh the list and try again." });
@@ -599,6 +657,7 @@ type DuplicateCopy = ReturnType<typeof previewCopy>;
 type Snapshot = {
   syncedAt: string;
   items: { id: string; name: string; aisle: string }[];
+  completed?: { id: string; name: string }[];
   duplicates: { key: string; name: string; keep: DuplicateCopy; copies: DuplicateCopy[] }[];
   checks: Record<string, Check>;
 };
@@ -637,6 +696,7 @@ async function syncSnapshot(list: Enrolled, tasks?: Task[]) {
   const snapshot: Snapshot = {
     syncedAt: new Date().toISOString(),
     items: planned.filter(task => task.status !== "completed").map(({ id, base, aisle }) => ({ id, name: base, aisle })),
+    completed: planned.filter(task => task.status === "completed").map(({ id, base }) => ({ id, name: base })),
     duplicates: groups.map(({ key, keep, copies }) => ({
       key, name: keep.base, keep: previewCopy(keep),
       copies: copies.map(task => previewCopy(task, [...detailFlags(task), ...(checks.get(task.id)?.flags ?? [])])),
@@ -707,8 +767,8 @@ app.post("/api/lists/:id/duplicates/remove", async (req, res) => {
     res.status(400).json({ error: "Refresh the duplicate preview before removing copies." });
     return;
   }
-  if (active.has(list.id)) {
-    res.status(409).json({ error: "Wait for the current list run to finish, then try again." });
+  if (active.has(list.id) || read(unenrollKey(list.id))) {
+    res.status(409).json({ error: "Wait for the current list run or finish unenrolling it, then try again." });
     return;
   }
   active.add(list.id);
