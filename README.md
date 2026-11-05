@@ -12,9 +12,9 @@ GraphRelay encrypts the Microsoft configuration and token cache with a key store
 
 ## Test the prototype
 
-Create a disposable list in Microsoft To Do and share it with the other shopper. Its contents are cached automatically. Enroll it from **To Do** to configure ongoing actions. New enrollments start with grouping and automatic duplicate cleanup off.
+Create a disposable list in Microsoft To Do and share it with the other shopper. Its contents are cached automatically. Open the list from **To Do**, select **Enroll List**, then select **Are You Sure?** to configure ongoing actions. New enrollments start with grouping and automatic duplicate cleanup off.
 
-Open **List settings** for an enrolled list to choose a grouping profile and prefix style, enable automatic duplicate cleanup, or override the sync interval. To use grouping in Microsoft To Do, set the list to Alphabetical on each phone. Use **Settings → To Do → Groupings** to edit shared grouping profiles and **Settings → To Do → General** to set the default sync interval. The **To Do settings** link on the overview opens that page. Use the **Enrollment** tab to unenroll a list. Optionally restore GraphRelay-prefixed names on open and completed items first. If restoration fails, background runs pause until you retry unenrollment. The list's local settings and corrections are removed after unenrollment succeeds.
+Open **List settings** for an enrolled list to choose a grouping profile and prefix style, enable automatic duplicate cleanup, or override the sync interval. To use grouping in Microsoft To Do, set the list to Alphabetical on each phone. Use **Settings → To Do → Groupings** to edit shared grouping profiles and **Settings → To Do → General** to set the default sync interval. Use the **Enrollment** tab to unenroll a list. Optionally restore GraphRelay-prefixed names on open and completed items first. If restoration fails, background runs pause until you retry unenrollment. The list's local settings and corrections are removed after unenrollment succeeds.
 
 In **List Settings → Formatting**, enable **Capitalize Each Word** to capitalize open item names when the list syncs. This works with any grouping setting.
 

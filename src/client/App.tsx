@@ -765,6 +765,7 @@ function DuplicatePreview({ path, onRemoved }: { path: string; onRemoved: () => 
 
 function ListDetail({ list, refresh }: { list: List; refresh: () => Promise<void> }) {
   const [settings, setSettings] = useState(false);
+  const [enrollment, setEnrollment] = useState<"idle" | "confirm" | "pending">("idle");
   const [showDuplicates, setShowDuplicates] = useState(false);
   const [itemRevision, setItemRevision] = useState(0);
   const [previewRevision, setPreviewRevision] = useState(0);
@@ -782,6 +783,23 @@ function ListDetail({ list, refresh }: { list: List; refresh: () => Promise<void
     }).catch(error => { if (current) setError(error.message); });
     return () => { current = false; };
   }, [path, list.enrolled, list.lastRun]);
+  async function enroll() {
+    if (enrollment === "idle") {
+      setError("");
+      setEnrollment("confirm");
+      return;
+    }
+    if (enrollment !== "confirm") return;
+    setEnrollment("pending");
+    try {
+      await api(path + "/enroll", "POST");
+      await refresh();
+    } catch (error) {
+      setError((error as Error).message);
+    } finally {
+      setEnrollment("idle");
+    }
+  }
   async function sync() {
     setSyncing(true);
     setError("");
@@ -815,7 +833,12 @@ function ListDetail({ list, refresh }: { list: List; refresh: () => Promise<void
     <Link to="/todo" className="text-sm text-on-surface-variant">← To Do</Link>
     <PageHeader title={list.displayName}>
       <button className={primaryButtonClass} disabled={syncing} onClick={() => void sync()}>{syncing ? "Syncing…" : "Sync Now"}</button>
-      {list.enrolled ? <button className={secondaryButtonClass} onClick={() => setSettings(true)}>List Settings</button> : <Link className={secondaryButtonClass} to={{ pathname: "/todo/enroll", search: new URLSearchParams({ list: list.id }).toString() }}>Enroll List</Link>}
+      {list.enrolled ? <button className={secondaryButtonClass} onClick={() => setSettings(true)}>List Settings</button> : <>
+        <button className={enrollment === "confirm" ? primaryButtonClass : secondaryButtonClass} disabled={enrollment === "pending"} onClick={() => void enroll()}>
+          {enrollment === "pending" ? "Enrolling…" : enrollment === "confirm" ? "Are You Sure?" : "Enroll List"}
+        </button>
+        {enrollment === "confirm" && <button className={secondaryButtonClass} onClick={() => setEnrollment("idle")}>Cancel</button>}
+      </>}
       <button className={secondaryButtonClass} aria-haspopup="dialog" onClick={() => setShowDuplicates(true)}>Duplicates</button>
       <button className={secondaryButtonClass} disabled={loadingHistory} aria-expanded={!!history} onClick={() => void activity()}>{history ? "Hide Activity" : "View Activity"}</button>
     </PageHeader>
@@ -848,7 +871,7 @@ function useListDirectory() {
     const timer = window.setInterval(() => void load(), 3000);
     return () => { active = false; window.clearInterval(timer); };
   }, []);
-  return { directory, setDirectory, error, setError };
+  return { directory, error };
 }
 
 function AvailableLists() {
@@ -870,61 +893,6 @@ function AvailableLists() {
       : <p>Waiting for the first Microsoft list sync.</p>
     )}
   </SectionCard>;
-}
-
-function EnrollList({ refresh }: { refresh: () => Promise<void> }) {
-  const navigate = useNavigate();
-  const [enrolling, setEnrolling] = useState(false);
-  const [params, setParams] = useSearchParams();
-  const selected = params.get("list") ?? "";
-  const { directory, setDirectory, error, setError } = useListDirectory();
-  async function refreshDirectory() {
-    if (!directory) return;
-    setError("");
-    setDirectory({ ...directory, syncing: true });
-    try {
-      await api("/list-directory/refresh", "POST");
-    } catch (error) {
-      setDirectory({ ...directory, syncing: false });
-      setError((error as Error).message);
-    }
-  }
-  const available = directory?.lists ?? [];
-  const list = available.find(list => list.id === selected);
-  async function enroll() {
-    if (!list) return;
-    setEnrolling(true);
-    setError("");
-    try {
-      await api("/lists/" + encodeURIComponent(list.id) + "/enroll", "POST");
-      await refresh();
-      navigate(listUrl(list.id), { replace: true });
-    } catch (error) {
-      setError((error as Error).message);
-    } finally {
-      setEnrolling(false);
-    }
-  }
-  return <Page className="space-y-5">
-    <Link to="/todo" className="text-sm text-on-surface-variant">← To Do</Link>
-    <PageHeader title="Enroll A List">
-      {directory?.connected && <button className={secondaryButtonClass} disabled={directory.syncing} onClick={() => void refreshDirectory()}>{directory.syncing ? "Refreshing…" : "Refresh Available Lists"}</button>}
-    </PageHeader>
-    {(error || directory?.directoryError) && <ErrorBanner message={error || directory!.directoryError} />}
-    {directory && !directory.connected && <Link to="/settings">Connect Microsoft in Settings</Link>}
-    {directory?.connected && !directory.directoryReady && <p>Waiting for GraphRelay to sync available Microsoft lists.</p>}
-    {available.length ? <SectionCard title="Choose A Microsoft To Do List">
-      <label className="grid gap-2 text-sm">Microsoft To Do List
-        <SelectInput value={list?.id ?? ""} onChange={value => setParams(value ? { list: value } : {}, { replace: true })}>
-          <option value="">Choose A List</option>
-          {available.map(list => <option key={list.id} value={list.id}>{list.displayName}{list.isShared ? " (shared)" : ""}</option>)}
-        </SelectInput>
-      </label>
-    </SectionCard> : directory?.directoryReady && <p>All available lists are enrolled.</p>}
-    {list && <SectionCard title={list.displayName} description="Enrollment lets you configure automatic actions and a custom sync interval in List Settings.">
-      <button className={primaryButtonClass} disabled={enrolling} onClick={() => void enroll()}>{enrolling ? "Enrolling…" : "Enroll List"}</button>
-    </SectionCard>}
-  </Page>;
 }
 
 function ListPage({ lists, refresh }: { lists: List[]; refresh: () => Promise<void> }) {
@@ -972,7 +940,7 @@ function ToDo() {
     {error && <Page><ErrorBanner message={error} /></Page>}
     <Routes>
       <Route index element={<Page className="space-y-5">
-        <PageHeader title="To Do"><Link className={secondaryButtonClass} to="/settings?tab=todo&section=general">To Do Settings</Link><Link className={primaryButtonClass} to="/todo/enroll">Enroll A List</Link></PageHeader>
+        <PageHeader title="To Do" />
         <SectionCard title="Enrolled Lists">
           {enrolled.length ? <ul className="grid gap-2">
             {enrolled.map(list => <li key={list.id}>
@@ -985,7 +953,7 @@ function ToDo() {
         </SectionCard>
         <AvailableLists />
       </Page>} />
-      <Route path="enroll" element={<EnrollList refresh={refresh} />} />
+      <Route path="enroll" element={<Navigate to="/todo" replace />} />
       <Route path=":listId" element={<ListPage lists={lists} refresh={refresh} />} />
       <Route path=":listId/settings" element={<ListPage lists={lists} refresh={refresh} />} />
     </Routes>
