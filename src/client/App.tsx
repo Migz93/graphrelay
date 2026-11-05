@@ -1,6 +1,7 @@
 import { DndContext, DragOverlay, KeyboardSensor, PointerSensor, closestCenter, pointerWithin, rectIntersection, useDraggable, useSensor, useSensors, type CollisionDetection, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { cn } from "./lib/utils";
 import { groupingDraft, matchKey, moveMatch, removeGroup, type GroupDraft, type MatchGroup } from "./lib/groupingDraft";
 import { GripVertical, Minus, Plus, X } from "lucide-react";
 import { useDialogA11y } from "./hooks/useDialogA11y";
@@ -559,7 +560,7 @@ function GroupingProfiles({ cancel, onBusy }: { cancel: () => void; onBusy: (bus
                   {groups.map(group => <GroupRow key={group.id} group={group} selected={group.id === activeId} busy={busy} choose={() => selectGroup(group.id)} remove={() => deleteGroup(group.id)} />)}
                 </SortableContext>
               </nav>
-              <button type="button" className={secondaryButtonClass + " mt-3 hidden shrink-0 md:flex"} disabled={busy || groups.length >= 30} aria-label="Add group" onClick={addGroup}><Plus size={16} />Add group</button>
+              <button type="button" className={cn(secondaryButtonClass, "mt-3 hidden shrink-0 md:flex")} disabled={busy || groups.length >= 30} aria-label="Add group" onClick={addGroup}><Plus size={16} />Add group</button>
             </div>
             {activeGroup && <fieldset disabled={busy} className="flex min-h-0 min-w-0 flex-col gap-4 rounded-xl border border-outline-variant/30 p-4 md:overflow-y-auto">
               <label className="grid shrink-0 gap-2 text-sm">Group name<TextInput value={activeGroup.name} onChange={value => { setGroups(groups.map(group => group.id === activeId ? { ...group, name: value } : group)); setNotice(""); }} required maxLength={40} readOnly={activeGroup.fallback} /></label>
