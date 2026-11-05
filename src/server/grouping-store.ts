@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { itemKey } from "./ordering.js";
 
-export type ProfileGroup = { name: string; matches: string[]; defaultMatches?: string[]; prefixes?: string[] };
+export type ProfileGroup = { name: string; matches: string[]; defaultMatches?: string[]; prefixes?: string[]; matchPlurals?: boolean };
 export type Profile = { id: string; name: string; groups: ProfileGroup[]; grocery: boolean; ignoreQuantities?: boolean };
 
 function validNames(value: unknown): value is string[] {
@@ -20,7 +20,8 @@ function parseProfile(value: unknown, file: string): Profile {
     || !Array.isArray(groups) || groups.length < 1 || groups.length > 30
     || !groups.every(group => group && typeof group.name === "string" && !!group.name.trim() && group.name.length <= 40
       && validNames(group.matches) && (group.defaultMatches === undefined || validNames(group.defaultMatches))
-      && (group.prefixes === undefined || validNames(group.prefixes)))) {
+      && (group.prefixes === undefined || validNames(group.prefixes))
+      && (group.matchPlurals === undefined || typeof group.matchPlurals === "boolean"))) {
     throw new Error("Grouping profiles: " + file + " has an unsupported or invalid profile format.");
   }
   const names = groups.map(group => itemKey(group.name));
@@ -33,7 +34,7 @@ function parseProfile(value: unknown, file: string): Profile {
     ignoreQuantities: profile.ignoreQuantities ?? false,
     groups: groups.map(group => ({
       name: group.name.trim(), matches: group.matches.map(itemKey),
-      defaultMatches: group.defaultMatches?.map(itemKey), prefixes: group.prefixes?.map(itemKey),
+      defaultMatches: group.defaultMatches?.map(itemKey), prefixes: group.prefixes?.map(itemKey), matchPlurals: group.matchPlurals ?? false,
     })),
   };
 }

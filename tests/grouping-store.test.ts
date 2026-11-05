@@ -20,8 +20,9 @@ test("profile files preserve rules, stable IDs and filenames across edits", () =
     store.save(profile);
     const saved = JSON.parse(readFileSync(join(directory, "groceries.json"), "utf8"));
     equal(saved.schemaVersion, 1);
-    deepEqual(saved.groups[0], { name: "Frozen", matches: ["frozen berries"], defaultMatches: ["peas"], prefixes: ["frozen"] });
-    store.save({ ...store.read()[0], name: "My groceries" });
+    deepEqual(saved.groups[0], { name: "Frozen", matches: ["frozen berries"], defaultMatches: ["peas"], prefixes: ["frozen"], matchPlurals: false });
+    store.save({ ...store.read()[0], name: "My groceries", groups: store.read()[0].groups.map(group => ({ ...group, matchPlurals: true })) });
+    equal(store.read()[0].groups[0].matchPlurals, true);
     deepEqual(readdirSync(directory), ["groceries.json"]);
     equal(store.read()[0].id, "groceries");
     const changed = { ...saved, name: "Changed on disk" };

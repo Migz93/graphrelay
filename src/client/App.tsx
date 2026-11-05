@@ -2,7 +2,7 @@ import { DndContext, DragOverlay, KeyboardSensor, PointerSensor, closestCenter, 
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { cn } from "./lib/utils";
-import { groupingDraft, matchKey, moveMatch, removeGroup, type GroupDraft, type MatchGroup } from "./lib/groupingDraft";
+import { compactMatches, groupingDraft, matchKey, moveMatch, removeGroup, type GroupDraft, type MatchGroup } from "./lib/groupingDraft";
 import { GripVertical, Minus, Plus, X } from "lucide-react";
 import { useDialogA11y } from "./hooks/useDialogA11y";
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
@@ -514,7 +514,7 @@ function GroupingProfiles({ onBusy }: { onBusy: (busy: boolean) => void }) {
     if (unnamed) { setActiveId(unnamed.id); setError("Give every group a name before saving."); return; }
     setBusy(true); onBusy(true); setError(""); setNotice("");
     try {
-      const saved = await api<GroupingProfile>("/grouping-profiles/" + selected, "PUT", { name, allMatches: true, groups: groups.map(({ name, matches, prefixes }) => ({ name, matches, prefixes })) });
+      const saved = await api<GroupingProfile>("/grouping-profiles/" + selected, "PUT", { name, allMatches: true, groups: groups.map(({ name, matches, prefixes, matchPlurals }) => ({ name, matches, prefixes, matchPlurals })) });
       const values = await api<GroupingProfile[]>("/grouping-profiles");
       setProfiles(values); choose(saved.id, values);
       setNotice("Profile saved. Lists using it will update on their next sync.");
@@ -523,7 +523,7 @@ function GroupingProfiles({ onBusy }: { onBusy: (busy: boolean) => void }) {
   }
   function addGroup() {
     const id = "new-" + nextId.current++;
-    setGroups([...groups, { id, name: "", matches: [], prefixes: [], fallback: false }]);
+    setGroups([...groups, { id, name: "", matches: [], prefixes: [], fallback: false, matchPlurals: false }]);
     selectGroup(id);
     setNotice("");
   }
@@ -588,7 +588,17 @@ function GroupingProfiles({ onBusy }: { onBusy: (busy: boolean) => void }) {
               <button type="button" className={cn(secondaryButtonClass, "mt-3 hidden shrink-0 md:flex")} disabled={busy || groups.length >= 30} aria-label="Add group" onClick={addGroup}><Plus size={16} />Add group</button>
             </div>
             {activeGroup && <fieldset disabled={busy} className="flex min-h-0 min-w-0 flex-col gap-4 rounded-xl border border-outline-variant/30 p-4 md:overflow-y-auto">
-              <label className="grid shrink-0 gap-2 text-sm">Group name<TextInput value={activeGroup.name} onChange={value => { setGroups(groups.map(group => group.id === activeId ? { ...group, name: value } : group)); setNotice(""); }} required maxLength={40} readOnly={activeGroup.fallback} /></label>
+              <div className="flex shrink-0 flex-wrap items-end gap-x-5 gap-y-2">
+                <label className="grid min-w-0 flex-1 basis-48 gap-2 text-sm md:max-w-sm">Group name<TextInput value={activeGroup.name} onChange={value => { setGroups(groups.map(group => group.id === activeId ? { ...group, name: value } : group)); setNotice(""); }} required maxLength={40} readOnly={activeGroup.fallback} /></label>
+                <label className="flex items-center gap-2 pb-3 text-sm">
+                  <input type="checkbox" className="accent-primary" checked={activeGroup.matchPlurals} onChange={event => {
+                    const enabled = event.target.checked;
+                    setGroups(groups.map(group => group.id === activeId ? { ...group, matchPlurals: enabled, matches: compactMatches(group.matches, enabled) } : group));
+                    setMoveItem(""); setNotice("");
+                  }} />
+                  Match singular and plural
+                </label>
+              </div>
               <div className="flex min-h-0 flex-1 flex-col gap-2">
                 <h3 className="text-sm">Item Matches</h3>
                 <div aria-label="Item matches" className="flex min-h-24 content-start flex-wrap items-start gap-2 overflow-y-auto rounded-lg border border-outline-variant/30 bg-background p-3 md:flex-1">

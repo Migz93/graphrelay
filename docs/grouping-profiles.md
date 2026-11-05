@@ -33,6 +33,7 @@ The group order in the file is the display and prefix order. Each profile needs 
 
 - `matches` contains exact item names, ignoring case and repeated spaces.
 - `defaultMatches` is an optional list of default aliases. The Groceries file includes its built-in aliases here. The popup combines default aliases and additional matches into editable chips. Saving from the popup stores the full edited item set in `matches` and clears `defaultMatches`, so moved or removed default items stay changed.
+- `matchPlurals` is an optional per-group boolean. When enabled, a match covers singular and plural English forms, such as apple/apples and potato/potatoes. Saved matches use one singular form. It defaults to false for existing files.
 - `prefixes` optionally matches a storage word followed by a space, such as frozen or tinned.
 - `ignoreQuantities` enables aisle matching without a leading count such as 2 x, or a trailing count, weight, volume or pack size. Original item names and duplicate identity keep their quantities.
 - `grocery` controls the grocery-specific editor labels and default-group protection.

@@ -27,3 +27,16 @@ test("removing a group preserves its rules in Other and the fallback stays requi
   deepEqual(next[0].prefixes, ["frozen"]);
   deepEqual(removeGroup(next, next[0].id), next);
 });
+
+test("enabled groups collapse pairs and moving to an exact group keeps both forms", () => {
+  const groups = groupingDraft([
+    { name: "Produce", matches: ["apple", "apples", "potatoes"], matchPlurals: true },
+    { name: "Other", matches: [] },
+  ]);
+  deepEqual(groups[0].matches, ["apple", "potato"]);
+  const moved = moveMatch(groups, "apple", groups[1].id);
+  deepEqual(moved[0].matches, ["potato"]);
+  deepEqual(moved[1].matches, ["apple", "apples"]);
+  const removed = removeGroup(groups, groups[0].id);
+  deepEqual(removed[0].matches, ["apple", "apples", "potato", "potatoes"]);
+});

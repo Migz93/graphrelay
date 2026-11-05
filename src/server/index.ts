@@ -1,3 +1,4 @@
+import pluralize from "pluralize";
 import { profileMatcher } from "./profile-matcher.js";
 import express from "express";
 import session from "express-session";
@@ -516,14 +517,20 @@ app.put("/api/grouping-profiles/:id", (req, res) => {
     || !Array.isArray(groups) || groups.length < 1 || groups.length > 30
     || !groups.every(group => typeof group?.name === "string" && !!group.name.trim() && group.name.trim().length <= 40
       && Array.isArray(group.matches) && group.matches.every((match: unknown) => typeof match === "string")
+      && (group.matchPlurals === undefined || typeof group.matchPlurals === "boolean")
       && (allMatches !== true || Array.isArray(group.prefixes) && group.prefixes.every((prefix: unknown) => typeof prefix === "string")))) {
     res.status(400).json({ error: "Enter a profile name and between 1 and 30 named groups." });
     return;
   }
-  const normalized = (groups as Profile["groups"]).map(group => ({
-    name: group.name.trim(), matches: group.matches.map(itemKey).filter(Boolean),
-    prefixes: group.prefixes?.map(itemKey).filter(Boolean),
-  }));
+  const normalized = (groups as Profile["groups"]).map(group => {
+    const matchPlurals = group.matchPlurals ?? existing?.groups.find(value => value.name === group.name)?.matchPlurals ?? false;
+    const matches = group.matches.map(itemKey).filter(Boolean);
+    return {
+      name: group.name.trim(),
+      matches: [...new Set(matchPlurals ? matches.map(match => pluralize.singular(match)) : matches)],
+      prefixes: group.prefixes?.map(itemKey).filter(Boolean), matchPlurals,
+    };
+  });
   const names = normalized.map(group => itemKey(group.name));
   const matches = normalized.flatMap(group => group.matches);
   if (!normalized.some(group => group.name === "Other") || new Set(names).size !== names.length || new Set(matches).size !== matches.length) {
