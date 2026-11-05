@@ -12,15 +12,15 @@ GraphRelay encrypts the Microsoft configuration and token cache with a key store
 
 ## Test the prototype
 
-Create a disposable list in Microsoft To Do and share it with the other shopper. Enroll it from **To Do** to start reading its contents into GraphRelay. New enrollments start with grouping and automatic duplicate cleanup off.
+Create a disposable list in Microsoft To Do and share it with the other shopper. Its contents are cached automatically. Enroll it from **To Do** to configure ongoing actions. New enrollments start with grouping and automatic duplicate cleanup off.
 
 Open **List settings** for an enrolled list to choose a grouping profile and prefix style, enable automatic duplicate cleanup, or override the sync interval. To use grouping in Microsoft To Do, set the list to Alphabetical on each phone. Use **Settings → To Do → Groupings** to edit shared grouping profiles and **Settings → To Do → General** to set the default sync interval. The **To Do settings** link on the overview opens that page. Use the **Enrollment** tab to unenroll a list. Optionally restore GraphRelay-prefixed names on open and completed items first. If restoration fails, background runs pause until you retry unenrollment. The list's local settings and corrections are removed after unenrollment succeeds.
 
 Completed items appear in a collapsed section below the open items. The built-in **Groceries** profile recognizes common aliases, storage labels and pack sizes. Profiles are stored as JSON under `/config/todo/groupings`, with the default profile in `groceries.json`. You can copy these files to another GraphRelay instance or edit them directly. See [grouping profile files](docs/grouping-profiles.md) for the format. Custom profiles match the item names you enter. Corrections made beside an item apply to that list.
 
-**Sync Now** runs the selected list immediately with its saved settings. **View activity** shows the changes. The dashboard reads enrolled lists, open items and duplicate previews from local storage. Background sync refreshes those snapshots.
+**Sync Now** runs the selected list immediately with its saved settings. **View activity** shows the changes. The dashboard reads enrolled lists, open items and duplicate previews from local storage. Background sync caches every available list at the default sync interval, including unenrolled lists. Enrolled lists use their configured interval and actions; unenrolled lists are read-only.
 
-**Duplicates** shows which copies would be kept or removed. Confirm **Remove Proposed Duplicates** to remove eligible copies. Lists can be opened and cleaned once without enrollment. Opening an unenrolled list refreshes a local snapshot without enabling background automations. **Duplicates** opens a review popup. Both manual and automatic cleanup prefer an open copy and skip copies with notes, attachments or checklist steps. The ms-ical port is future work.
+**Duplicates** shows which copies would be kept or removed. Confirm **Remove Proposed Duplicates** to remove eligible copies. Lists can be opened and cleaned once without enrollment. Unenrolled lists show their scheduled local snapshot immediately; **Sync Now** refreshes it on demand. **Duplicates** opens a review popup. Both manual and automatic cleanup prefer an open copy and skip copies with notes, attachments or checklist steps. The ms-ical port is future work.
 
 ## Development
 

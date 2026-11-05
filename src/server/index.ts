@@ -302,14 +302,19 @@ let pollTimer: NodeJS.Timeout | undefined;
 function intervalMinutes(id: string) {
   return Number(read(intervalKey(id)) || pollingMinutes());
 }
+function pollableLists() {
+  return [...new Set([...localDirectory().map(list => list.id), ...(db.prepare("SELECT id FROM lists").all() as { id: string }[]).map(list => list.id)])];
+}
+function scheduledInterval(id: string) {
+  return enrolledList(id) ? intervalMinutes(id) : pollingMinutes();
+}
 function schedulePoll(delay?: number) {
   clearTimeout(pollTimer);
   if (sweeping) return;
   if (delay === undefined) {
     const now = Date.now();
     const directoryDue = lastDirectoryPoll + pollingMinutes() * 60_000;
-    const lists = db.prepare("SELECT id FROM lists").all() as { id: string }[];
-    const next = lists.reduce((due, { id }) => (active.has(id) || read(unenrollKey(id))) ? due : Math.min(due, (lastAttempts.get(id) ?? 0) + intervalMinutes(id) * 60_000), directoryDue);
+    const next = pollableLists().reduce((due, id) => (active.has(id) || read(unenrollKey(id))) ? due : Math.min(due, (lastAttempts.get(id) ?? 0) + scheduledInterval(id) * 60_000), directoryDue);
     delay = msal && read("username") ? Math.max(0, next - now) : pollingMinutes() * 60_000;
   }
   pollTimer = setTimeout(pollLists, delay).unref();
@@ -318,16 +323,16 @@ async function pollLists() {
   sweeping = true;
   try {
     if (!msal || !read("account") || !read("username")) return;
-    let directory: Promise<void> | undefined;
     if (Date.now() >= lastDirectoryPoll + pollingMinutes() * 60_000) {
       lastDirectoryPoll = Date.now();
-      directory = syncDirectory();
+      await syncDirectory();
     }
-    for (const { id } of db.prepare("SELECT id FROM lists").all() as { id: string }[]) {
-      const list = enrolledList(id);
-      if (list && !active.has(id) && !read(unenrollKey(id)) && Date.now() >= (lastAttempts.get(id) ?? 0) + intervalMinutes(id) * 60_000) await run(list, true).catch(() => undefined);
+    for (const id of pollableLists()) {
+      if (active.has(id) || read(unenrollKey(id)) || Date.now() < (lastAttempts.get(id) ?? 0) + scheduledInterval(id) * 60_000) continue;
+      const enrolled = enrolledList(id);
+      const list = enrolled ?? knownList(id);
+      if (list) await (enrolled ? run(enrolled, true) : refreshListSnapshot(list)).catch(() => undefined);
     }
-    await directory;
   } finally {
     sweeping = false;
     schedulePoll();
@@ -669,6 +674,7 @@ async function performSnapshotRefresh(list: Enrolled) {
     throw new Error("Run failed. Microsoft list could not be refreshed. Try again.");
   } finally {
     active.delete(list.id);
+    lastAttempts.set(list.id, Date.now());
     schedulePoll();
   }
 }

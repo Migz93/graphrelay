@@ -729,13 +729,13 @@ function ListDetail({ list, refresh }: { list: List; refresh: () => Promise<void
   const [syncNotice, setSyncNotice] = useState("");
   const path = "/lists/" + encodeURIComponent(list.id);
   useEffect(() => {
-    if (list.enrolled) return;
+    if (list.enrolled || list.lastRun) return;
     let current = true;
     void api(path + "/refresh", "POST").then(() => {
       if (current) { setItemRevision(value => value + 1); void refresh(); }
     }).catch(error => { if (current) setError(error.message); });
     return () => { current = false; };
-  }, [path, list.enrolled]);
+  }, [path, list.enrolled, list.lastRun]);
   async function sync() {
     setSyncing(true);
     setError("");
