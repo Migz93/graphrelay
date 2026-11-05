@@ -504,7 +504,7 @@ function GroupingProfiles({ cancel, onBusy }: { cancel: () => void; onBusy: (bus
             </div>
             <nav aria-label="Profile groups" className="hidden min-h-0 flex-1 space-y-1 overflow-y-auto md:block">
               {groups.map((group, index) => <button key={index} type="button" disabled={busy} aria-pressed={activeIndex === index}
-                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm ${activeIndex === index ? "bg-primary-dim text-on-surface" : "text-on-surface-variant hover:bg-background-container-high hover:text-on-surface"}`}
+                className={`flex w-full items-center gap-3 rounded-lg px-3 py-1.5 text-left text-sm ${activeIndex === index ? "bg-primary-dim text-on-surface" : "text-on-surface-variant hover:bg-background-container-high hover:text-on-surface"}`}
                 onClick={() => setActiveIndex(index)}>
                 <span className="w-5 shrink-0 text-xs opacity-70">{String(index + 1).padStart(2, "0")}</span>
                 <span className="truncate">{group.name || "New group"}</span>
