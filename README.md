@@ -20,7 +20,7 @@ Completed items appear in a collapsed section below the open items. The built-in
 
 **Sync Now** runs the selected list immediately with its saved settings. **View activity** shows the changes. The dashboard reads enrolled lists, open items and duplicate previews from local storage. Background sync refreshes those snapshots.
 
-**Preview duplicates** shows which copies would be kept or removed. Confirm **Remove proposed duplicates** to remove eligible copies. Both manual and automatic cleanup prefer an open copy and skip copies with notes, attachments or checklist steps. The ms-ical port is future work.
+**Duplicates** shows which copies would be kept or removed. Confirm **Remove Proposed Duplicates** to remove eligible copies. Lists can be opened and cleaned once without enrollment. Opening an unenrolled list refreshes a local snapshot without enabling background automations. **Duplicates** opens a review popup. Both manual and automatic cleanup prefer an open copy and skip copies with notes, attachments or checklist steps. The ms-ical port is future work.
 
 ## Development
 

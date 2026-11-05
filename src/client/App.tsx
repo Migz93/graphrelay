@@ -67,7 +67,7 @@ function Login({ onLogin, firstRun = false }: { onLogin: () => void; firstRun?: 
         className="w-full rounded-xl border border-outline-variant/40 bg-background-container px-4 py-3 text-on-surface outline-none focus:border-primary" />
       {error && <div role="alert" className="mt-5 rounded-xl border border-error/30 bg-error/10 px-4 py-3 text-sm text-error">{error}</div>}
       <button type="submit" disabled={busy} className="mt-7 w-full rounded-xl bg-primary px-4 py-3 text-sm font-bold text-on-surface transition-colors hover:bg-primary-dim disabled:cursor-not-allowed disabled:opacity-60">
-        {busy ? "Please wait…" : firstRun ? "Create admin password" : "Sign in"}
+        {busy ? "Please wait…" : firstRun ? "Create Admin Password" : "Sign In"}
       </button>
     </form>
   </main>;
@@ -99,15 +99,15 @@ function PollingSettings() {
       setBusy(false);
     }
   }
-  return <SectionCard title="To Do polling" description="Choose how often GraphRelay checks enrolled lists for changes.">
+  return <SectionCard title="To Do Polling" description="Choose how often GraphRelay checks enrolled lists for changes.">
     {error && <ErrorBanner message={error} />}
     {!!options.length && <form className="grid gap-3" onSubmit={save}>
-      <label className="grid gap-2 text-sm">Polling interval
+      <label className="grid gap-2 text-sm">Polling Interval
         <SelectInput value={minutes} onChange={setMinutes} disabled={busy}>
           {options.map(option => <option key={option} value={option}>{option} {option === 1 ? "minute" : "minutes"}</option>)}
         </SelectInput>
       </label>
-      <div><button className={secondaryButtonClass} disabled={busy || minutes === saved}>Save polling interval</button></div>
+      <div><button className={secondaryButtonClass} disabled={busy || minutes === saved}>Save Polling Interval</button></div>
     </form>}
   </SectionCard>;
 }
@@ -158,7 +158,7 @@ function MicrosoftSettings() {
     : "Microsoft sign-in failed." + (/^AADSTS[0-9]{4,10}$/.test(reason) ? " Microsoft error " + reason + "." : "") + " Try connecting again.";
   return <div className="space-y-5">
     {(error || (outcome && !savedSecret)) && <ErrorBanner message={error || (outcome === "wrong-account" ? "Reconnect using the Microsoft account that owns your enrolled lists." : signInError)} />}
-    <SectionCard title="Microsoft connection" description="Connect the Microsoft account that owns your shared shopping list.">
+    <SectionCard title="Microsoft Connection" description="Connect the Microsoft account that owns your shared shopping list.">
       {connection && <>
         <SettingRow label="Account" action>
           <button className={primaryButtonClass} onClick={() => void connect()} disabled={busy || !connection.clientId}>
@@ -168,15 +168,15 @@ function MicrosoftSettings() {
         {connection.account && <p>Connected as {connection.account}</p>}
         <p className="break-all text-sm text-on-surface-variant">Redirect URI · {connection.redirectUri}</p>
         {connection.editable && <details open={!connection.clientId || outcome === "failed"}>
-          <summary className="cursor-pointer text-sm">Microsoft app credentials</summary>
+          <summary className="cursor-pointer text-sm">Microsoft App Credentials</summary>
           <form onSubmit={saveSecret} className="mt-3 grid gap-3">
-            <label className="grid gap-2 text-sm">Application (client) ID
+            <label className="grid gap-2 text-sm">Application (Client) ID
               <TextInput value={clientId} onChange={setClientId} autoComplete="off" required />
             </label>
-            <label className="grid gap-2 text-sm">Client secret value
+            <label className="grid gap-2 text-sm">Client Secret Value
               <TextInput type="password" value={secret} onChange={setSecret} autoComplete="off" required />
             </label>
-            <div><button className={secondaryButtonClass} disabled={savingSecret}>Save Microsoft credentials</button></div>
+            <div><button className={secondaryButtonClass} disabled={savingSecret}>Save Microsoft Credentials</button></div>
             {savedSecret && <p role="status" className="text-sm text-success">Microsoft credentials saved. Select Connect Microsoft to try again.</p>}
           </form>
         </details>}
@@ -198,25 +198,25 @@ function Settings({ build }: { build: BuildInfo }) {
   return <Page>
     <PageHeader title="Settings" />
     <div className="mb-6 md:hidden">
-      <select aria-label="Settings section" value={tab} onChange={event => selectTab(event.target.value)} disabled={busy}
+      <select aria-label="Settings Section" value={tab} onChange={event => selectTab(event.target.value)} disabled={busy}
         className="w-full rounded-xl border border-outline-variant/20 bg-background-container-high px-4 py-2.5 text-sm font-medium text-on-surface focus:border-primary/50 focus:outline-none">
         {tabs.map(value => <option key={value.id} value={value.id}>{value.label}</option>)}
       </select>
     </div>
-    <nav aria-label="Settings sections" className="mb-6 hidden rounded-xl bg-background-container-high p-1 md:flex">
+    <nav aria-label="Settings Sections" className="mb-6 hidden rounded-xl bg-background-container-high p-1 md:flex">
       {tabs.map(value => <button key={value.id} type="button" disabled={busy} aria-pressed={tab === value.id} onClick={() => selectTab(value.id)}
         className={`flex-1 whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-all ${tab === value.id ? "bg-background-container text-on-surface shadow-sm" : "text-on-surface-variant hover:text-on-surface"}`}>{value.label}</button>)}
     </nav>
     {tab === "general" && <MicrosoftSettings />}
     {tab === "todo" && <>
-      <nav aria-label="To Do settings sections" className="mb-6 flex w-fit max-w-full gap-1 rounded-xl bg-background-container-high p-1">
+      <nav aria-label="To Do Settings Sections" className="mb-6 flex w-fit max-w-full gap-1 rounded-xl bg-background-container-high p-1">
         {[{ id: "general", label: "General" }, { id: "groupings", label: "Groupings" }].map(value => <button key={value.id} type="button" disabled={busy} aria-pressed={section === value.id}
           onClick={() => { if (!busy) setParams({ tab: "todo", section: value.id }); }}
           className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-all ${section === value.id ? "bg-background-container text-on-surface shadow-sm" : "text-on-surface-variant hover:text-on-surface"}`}>{value.label}</button>)}
       </nav>
       {section === "general" ? <PollingSettings /> : <GroupingProfiles onBusy={setBusy} />}
     </>}
-    {tab === "about" && <SectionCard title="Build information">
+    {tab === "about" && <SectionCard title="Build Information">
       <dl className="grid gap-3 text-sm">
         <div><dt className="text-on-surface-variant">Version</dt><dd>v{build.version}</dd></div>
         <div><dt className="text-on-surface-variant">Channel</dt><dd className="capitalize">{build.channel}</dd></div>
@@ -273,8 +273,8 @@ function ItemAisles({ path, aisles, grouped, refresh }: { path: string; aisles: 
   }, [path, busy]);
   return <div className="grid gap-3 rounded-lg bg-background-container-low p-4">
     <div className="flex flex-wrap items-center justify-between gap-2">
-      <h2 className="font-medium">Open items</h2>
-      <button className={secondaryButtonClass} disabled={busy} onClick={() => void load()}>Refresh items</button>
+      <h2 className="font-medium">Open Items</h2>
+      <button className={secondaryButtonClass} disabled={busy} onClick={() => void load()}>Refresh Items</button>
     </div>
     {grouped && <p className="text-sm text-on-surface-variant">Group corrections are saved for items with the same name on this list.</p>}
     {error && <ErrorBanner message={error} />}
@@ -304,7 +304,7 @@ function ItemAisles({ path, aisles, grouped, refresh }: { path: string; aisles: 
       </section>;
     })}
     {snapshot?.syncedAt && <details className="rounded-lg border border-outline-variant/30 bg-background-container px-3 py-2">
-      <summary className="cursor-pointer py-1 text-sm font-medium">Completed items ({snapshot.completed?.length ?? 0})</summary>
+      <summary className="cursor-pointer py-1 text-sm font-medium">Completed Items ({snapshot.completed?.length ?? 0})</summary>
       {snapshot.completed?.length ? <ul className="mt-2 divide-y divide-outline-variant/30">
         {[...snapshot.completed].sort((a, b) => a.name.localeCompare(b.name)).map(item => <li key={item.id} className="break-words py-2 text-sm text-on-surface-variant">{item.name}</li>)}
       </ul> : <p className="py-2 text-sm text-on-surface-variant">No completed items.</p>}
@@ -331,11 +331,11 @@ function SettingsDialog({ title, tabs, selected, select, close, children }: {
     <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={id} className="max-h-[90dvh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-outline-variant/20 bg-background-container p-4 shadow-xl sm:p-6" onClick={event => event.stopPropagation()}>
       <div className="mb-4 flex shrink-0 items-center justify-between gap-2">
         <h2 id={id} className="font-headline text-lg font-semibold">{title}</h2>
-        <button type="button" aria-label="Close settings" data-overlay-initial-focus onClick={close} className="rounded-lg p-1.5 text-on-surface-variant hover:bg-background-container-high hover:text-on-surface"><X size={18} /></button>
+        <button type="button" aria-label="Close Settings" data-overlay-initial-focus onClick={close} className="rounded-lg p-1.5 text-on-surface-variant hover:bg-background-container-high hover:text-on-surface"><X size={18} /></button>
       </div>
-      <div className="mb-5 flex shrink-0 flex-wrap gap-2 border-b border-outline-variant/30 pb-3" aria-label="Settings sections">
+      {!!tabs.length && <div className="mb-5 flex shrink-0 flex-wrap gap-2 border-b border-outline-variant/30 pb-3" aria-label="Settings Sections">
         {tabs.map(tab => <button key={tab} type="button" aria-pressed={selected === tab} className={selected === tab ? primaryButtonClass : secondaryButtonClass} onClick={() => select(tab)}>{tab}</button>)}
-      </div>
+      </div>}
       {children}
     </div>
   </div>;
@@ -400,20 +400,20 @@ function ListSettings({ list, refresh, close }: { list: List; refresh: () => Pro
         {confirmUnenroll ? <>
           <p className="text-sm">Unenroll {list.displayName}{restorePrefixes ? " and restore names where the GraphRelay prefix is still present" : " with the current Microsoft To Do titles"}?</p>
           <div className="flex flex-wrap gap-2">
-            <button className={dangerButtonClass} disabled={busy} onClick={() => void unenroll()}>{busy ? "Unenrolling…" : "Confirm unenrollment"}</button>
+            <button className={dangerButtonClass} disabled={busy} onClick={() => void unenroll()}>{busy ? "Unenrolling…" : "Confirm Unenrollment"}</button>
             <button className={secondaryButtonClass} disabled={busy} onClick={() => setConfirmUnenroll(false)}>Cancel</button>
           </div>
-        </> : <div><button className={dangerButtonClass} disabled={busy} onClick={() => setConfirmUnenroll(true)}>Unenroll list</button></div>}
+        </> : <div><button className={dangerButtonClass} disabled={busy} onClick={() => setConfirmUnenroll(true)}>Unenroll List</button></div>}
       </div>}
       {tab === "Grouping" && <>
-        <SettingToggle label="Group items" hint="Apply a grouping profile to this list. Use Alphabetical sort in Microsoft To Do." checked={mode !== "off"} onChange={enabled => setMode(enabled ? "named" : "off")} />
+        <SettingToggle label="Group Items" hint="Apply a grouping profile to this list. Use Alphabetical sort in Microsoft To Do." checked={mode !== "off"} onChange={enabled => setMode(enabled ? "named" : "off")} />
         {mode !== "off" && <>
-          <label className="grid gap-2 text-sm">Grouping profile
+          <label className="grid gap-2 text-sm">Grouping Profile
             <SelectInput value={profileId} onChange={setProfileId} disabled={!profiles}>
               {profiles?.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
             </SelectInput>
           </label>
-          <label className="grid gap-2 text-sm">Prefix style
+          <label className="grid gap-2 text-sm">Prefix Style
             <SelectInput value={mode} onChange={setMode}>
               <option value="named">Named · 03 Frozen · Peas</option>
               <option value="number">Number only · 014 · Peas</option>
@@ -421,14 +421,14 @@ function ListSettings({ list, refresh, close }: { list: List; refresh: () => Pro
           </label>
         </>}
       </>}
-      {tab === "Duplicates" && <SettingToggle label="Automatic duplicate cleanup" hint="Keep one open copy when possible and skip copies flagged for review." checked={autoCleanup} onChange={setAutoCleanup} />}
-      {tab === "Sync" && <label className="grid gap-2 text-sm">Sync interval
+      {tab === "Duplicates" && <SettingToggle label="Automatic Duplicate Cleanup" hint="Keep one open copy when possible and skip copies flagged for review." checked={autoCleanup} onChange={setAutoCleanup} />}
+      {tab === "Sync" && <label className="grid gap-2 text-sm">Sync Interval
         <SelectInput value={syncMinutes} onChange={setSyncMinutes} disabled={!polling}>
           <option value="">Use default{polling ? " (" + polling.minutes + " min)" : ""}</option>
           {polling?.options.map(minutes => <option key={minutes} value={minutes}>{minutes} min</option>)}
         </SelectInput>
       </label>}
-      {tab !== "Enrollment" && <div><button className={primaryButtonClass} disabled={busy || !!list.unenrollPending || !profiles || !polling} onClick={() => void save()}>{busy ? "Saving…" : "Save list settings"}</button></div>}
+      {tab !== "Enrollment" && <div><button className={primaryButtonClass} disabled={busy || !!list.unenrollPending || !profiles || !polling} onClick={() => void save()}>{busy ? "Saving…" : "Save List Settings"}</button></div>}
     </div>
   </SettingsDialog>;
 }
@@ -444,10 +444,10 @@ function GroupRow({ group, selected, busy, choose, remove }: {
     className={`flex items-center gap-1 rounded-lg border ${isOver ? "border-primary" : "border-transparent"} ${selected ? "bg-primary-dim text-on-surface" : "text-on-surface-variant hover:bg-background-container-high"}`}>
     <button type="button" className="touch-none rounded p-2 focus-visible:outline-2 focus-visible:outline-primary" {...attributes} {...listeners} disabled={busy} aria-label={"Reorder " + (group.name || "new group")}><GripVertical size={16} /></button>
     <button type="button" className="min-w-0 flex-1 py-2 text-left text-sm" disabled={busy} aria-pressed={selected} onClick={choose}>
-      <span className="block truncate">{group.name || "New group"}</span>
+      <span className="block truncate">{group.name || "New Group"}</span>
       <span className="text-xs opacity-70">{group.matches.length} items</span>
     </button>
-    <button type="button" className="rounded p-2 hover:bg-background-bright disabled:opacity-30" disabled={busy || group.fallback} aria-label={"Remove group " + group.name} title={group.fallback ? "Other is required" : "Move items to Other and remove group"} onClick={remove}><Minus size={16} /></button>
+    <button type="button" className="rounded p-2 hover:bg-background-bright disabled:opacity-30" disabled={busy || group.fallback} aria-label={"Remove Group " + group.name} title={group.fallback ? "Other is required" : "Move items to Other and remove group"} onClick={remove}><Minus size={16} /></button>
   </div>;
 }
 
@@ -458,9 +458,9 @@ function MatchChip({ item, groupId, busy, selected, choose, remove }: {
     id: "match:" + item, data: { kind: "item", item, groupId, label: item }, disabled: busy,
   });
   return <span ref={setNodeRef} className={`inline-flex max-w-full items-center rounded-lg border bg-background-container-high text-sm ${selected ? "border-primary" : "border-outline-variant/30"} ${isDragging ? "opacity-30" : ""}`}>
-    <button type="button" disabled={busy} {...attributes} onPointerDown={event => listeners?.onPointerDown?.(event)} aria-label={"Move match " + item}
+    <button type="button" disabled={busy} {...attributes} onPointerDown={event => listeners?.onPointerDown?.(event)} aria-label={"Move Match " + item}
       className="min-w-0 touch-none break-words px-3 py-2 text-left focus-visible:outline-2 focus-visible:outline-primary" onClick={choose}>{item}</button>
-    <button type="button" disabled={busy} aria-label={"Remove match " + item} className="shrink-0 rounded p-2 text-on-surface-variant hover:text-error" onClick={remove}><X size={12} /></button>
+    <button type="button" disabled={busy} aria-label={"Remove Match " + item} className="shrink-0 rounded p-2 text-on-surface-variant hover:text-error" onClick={remove}><X size={12} /></button>
   </span>;
 }
 
@@ -486,11 +486,16 @@ function GroupingProfiles({ onBusy }: { onBusy: (busy: boolean) => void }) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
   const current = profiles?.find(profile => profile.id === selected);
   const activeGroup = groups.find(group => group.id === activeId);
-  function choose(id: string, values = profiles) {
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(""), 3000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+  function choose(id: string, values = profiles, groupName?: string) {
     const profile = values?.find(profile => profile.id === id);
     const draft = groupingDraft(profile?.groups ?? [{ name: "", matches: [] }, { name: "Other", matches: [] }]);
     setSelected(id);
-    setActiveId(draft[0].id);
+    setActiveId(draft.find(group => group.name === groupName)?.id ?? draft[0].id);
     setName(profile?.name ?? "");
     setGroups(draft);
     setError("");
@@ -516,8 +521,8 @@ function GroupingProfiles({ onBusy }: { onBusy: (busy: boolean) => void }) {
     try {
       const saved = await api<GroupingProfile>("/grouping-profiles/" + selected, "PUT", { name, allMatches: true, groups: groups.map(({ name, matches, prefixes, matchPlurals }) => ({ name, matches, prefixes, matchPlurals })) });
       const values = await api<GroupingProfile[]>("/grouping-profiles");
-      setProfiles(values); choose(saved.id, values);
-      setNotice("Profile saved. Lists using it will update on their next sync.");
+      setProfiles(values); choose(saved.id, values, activeGroup?.name.trim());
+      setNotice("saved");
     } catch (error) { setError((error as Error).message); }
     finally { setBusy(false); onBusy(false); }
   }
@@ -559,37 +564,36 @@ function GroupingProfiles({ onBusy }: { onBusy: (busy: boolean) => void }) {
   return <form onSubmit={save} className="flex h-[calc(100dvh-17rem)] min-h-[28rem] flex-col rounded-xl border border-outline-variant/30 bg-background-container p-4 sm:p-5">
     <div className="min-h-0 flex-1 overflow-y-auto md:flex md:flex-col md:overflow-hidden">
       {error && <ErrorBanner message={error} />}
-      {notice && <p role="status" className="mb-3 text-sm text-success">{notice}</p>}
       {!profiles && !error && <p>Loading grouping profiles…</p>}
       {profiles && <>
         <div className="mb-4 grid shrink-0 gap-3 md:grid-cols-2">
           <label className="grid gap-2 text-sm">Profile<SelectInput value={selected} onChange={value => choose(value)} disabled={busy}>
-            {profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}<option value="new">Create a profile…</option>
+            {profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}<option value="new">Create A Profile…</option>
           </SelectInput></label>
-          <label className="grid gap-2 text-sm">Profile name<TextInput value={name} onChange={value => { setName(value); setNotice(""); }} required maxLength={80} disabled={busy} /></label>
+          <label className="grid gap-2 text-sm">Profile Name<TextInput value={name} onChange={value => { setName(value); setNotice(""); }} required maxLength={80} disabled={busy} /></label>
           {current && <p className="text-sm text-on-surface-variant md:col-span-2">Used by {current.usedBy} {current.usedBy === 1 ? "list" : "lists"}.</p>}
         </div>
         <DndContext sensors={sensors} collisionDetection={profileCollision} onDragStart={event => { setDragLabel(String(event.active.data.current?.label ?? "")); setMoveItem(""); }}
           onDragEnd={dragEnd} onDragCancel={() => setDragLabel("")}>
           <div className="grid min-h-0 flex-1 gap-4 md:grid-cols-[15rem_minmax(0,1fr)]">
             <div className="flex min-h-0 flex-col rounded-xl border border-outline-variant/30 bg-background-container-low p-3">
-              <div className="mb-3 hidden shrink-0 items-center justify-between gap-2 md:flex"><h3 className="text-sm font-semibold">Group order</h3><span className="text-xs text-on-surface-variant">{groups.length} groups</span></div>
+              <div className="mb-3 hidden shrink-0 items-center justify-between gap-2 md:flex"><h3 className="text-sm font-semibold">Group Order</h3><span className="text-xs text-on-surface-variant">{groups.length} groups</span></div>
               <div className="grid grid-cols-[minmax(0,1fr)_2.5rem_2.5rem] items-end gap-2 md:hidden">
-                <label className="grid gap-2 text-sm">Selected group<SelectInput value={activeId} onChange={selectGroup} disabled={busy}>{groups.map(group => <option key={group.id} value={group.id}>{group.name || "New group"}</option>)}</SelectInput></label>
-                <button type="button" className={secondaryButtonClass} aria-label="Remove selected group" disabled={busy || activeGroup?.fallback} onClick={() => deleteGroup(activeId)}><Minus size={16} /></button>
-                <button type="button" className={secondaryButtonClass} aria-label="Add group" disabled={busy || groups.length >= 30} onClick={addGroup}><Plus size={16} /></button>
+                <label className="grid gap-2 text-sm">Selected Group<SelectInput value={activeId} onChange={selectGroup} disabled={busy}>{groups.map(group => <option key={group.id} value={group.id}>{group.name || "New Group"}</option>)}</SelectInput></label>
+                <button type="button" className={secondaryButtonClass} aria-label="Remove Selected Group" disabled={busy || activeGroup?.fallback} onClick={() => deleteGroup(activeId)}><Minus size={16} /></button>
+                <button type="button" className={secondaryButtonClass} aria-label="Add Group" disabled={busy || groups.length >= 30} onClick={addGroup}><Plus size={16} /></button>
               </div>
-              <button type="button" className="mt-2 text-left text-xs text-on-surface-variant md:hidden" aria-expanded={arranging} onClick={() => setArranging(!arranging)}>{arranging ? "Hide group order" : "Arrange groups"}</button>
+              <button type="button" className="mt-2 text-left text-xs text-on-surface-variant md:hidden" aria-expanded={arranging} onClick={() => setArranging(!arranging)}>{arranging ? "Hide Group Order" : "Arrange Groups"}</button>
               <nav aria-label="Profile groups" className={`min-h-0 space-y-1 overflow-y-auto ${arranging ? "mt-2 max-h-40" : "hidden"} md:mt-0 md:block md:max-h-none md:flex-1`}>
                 <SortableContext items={groups.map(group => "group:" + group.id)} strategy={verticalListSortingStrategy}>
                   {groups.map(group => <GroupRow key={group.id} group={group} selected={group.id === activeId} busy={busy} choose={() => selectGroup(group.id)} remove={() => deleteGroup(group.id)} />)}
                 </SortableContext>
               </nav>
-              <button type="button" className={cn(secondaryButtonClass, "mt-3 hidden shrink-0 md:flex")} disabled={busy || groups.length >= 30} aria-label="Add group" onClick={addGroup}><Plus size={16} />Add group</button>
+              <button type="button" className={cn(secondaryButtonClass, "mt-3 hidden shrink-0 md:flex")} disabled={busy || groups.length >= 30} aria-label="Add Group" onClick={addGroup}><Plus size={16} />Add Group</button>
             </div>
             {activeGroup && <fieldset disabled={busy} className="flex min-h-0 min-w-0 flex-col gap-4 rounded-xl border border-outline-variant/30 p-4 md:overflow-y-auto">
               <div className="flex shrink-0 flex-wrap items-end gap-x-5 gap-y-2">
-                <label className="grid min-w-0 flex-1 basis-48 gap-2 text-sm md:max-w-sm">Group name<TextInput value={activeGroup.name} onChange={value => { setGroups(groups.map(group => group.id === activeId ? { ...group, name: value } : group)); setNotice(""); }} required maxLength={40} readOnly={activeGroup.fallback} /></label>
+                <label className="grid min-w-0 flex-1 basis-48 gap-2 text-sm md:max-w-sm">Group Name<TextInput value={activeGroup.name} onChange={value => { setGroups(groups.map(group => group.id === activeId ? { ...group, name: value } : group)); setNotice(""); }} required maxLength={40} readOnly={activeGroup.fallback} /></label>
                 <label className="flex items-center gap-2 pb-3 text-sm">
                   <input type="checkbox" className="accent-primary" checked={activeGroup.matchPlurals} onChange={event => {
                     const enabled = event.target.checked;
@@ -601,17 +605,17 @@ function GroupingProfiles({ onBusy }: { onBusy: (busy: boolean) => void }) {
               </div>
               <div className="flex min-h-0 flex-1 flex-col gap-2">
                 <h3 className="text-sm">Item Matches</h3>
-                <div aria-label="Item matches" className="flex min-h-24 content-start flex-wrap items-start gap-2 overflow-y-auto rounded-lg border border-outline-variant/30 bg-background p-3 md:flex-1">
+                <div aria-label="Item Matches" className="flex min-h-24 content-start flex-wrap items-start gap-2 overflow-y-auto rounded-lg border border-outline-variant/30 bg-background p-3 md:flex-1">
                   {activeGroup.matches.map(item => <MatchChip key={item} item={item} groupId={activeId} busy={busy} selected={moveItem === item} choose={() => setMoveItem(moveItem === item ? "" : item)} remove={() => { setGroups(groups.map(group => group.id === activeId ? { ...group, matches: group.matches.filter(value => value !== item) } : group)); setMoveItem(""); setNotice(""); }} />)}
-                  <button type="button" className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-dashed border-outline-variant text-on-surface-variant hover:border-primary hover:text-on-surface" aria-label="Add item match" disabled={busy} onClick={() => setAddingItem(true)}><Plus size={16} /></button>
+                  <button type="button" className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-dashed border-outline-variant text-on-surface-variant hover:border-primary hover:text-on-surface" aria-label="Add Item Match" disabled={busy} onClick={() => setAddingItem(true)}><Plus size={16} /></button>
                 </div>
               </div>
               {addingItem && <div className="flex shrink-0 flex-wrap items-end gap-2">
-                <label className="grid min-w-0 flex-1 gap-2 text-sm">New item match<TextInput autoFocus value={itemName} onChange={setItemName} onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); addItem(); } if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setAddingItem(false); } }} /></label>
-                <button type="button" className={secondaryButtonClass} disabled={!itemName.trim()} onClick={addItem}>Add item</button>
+                <label className="grid min-w-0 flex-1 gap-2 text-sm">New Item Match<TextInput autoFocus value={itemName} onChange={setItemName} onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); addItem(); } if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setAddingItem(false); } }} /></label>
+                <button type="button" className={secondaryButtonClass} disabled={!itemName.trim()} onClick={addItem}>Add Item</button>
               </div>}
-              {moveItem && <label className="grid shrink-0 gap-2 text-sm">Move {moveItem} to
-                <SelectInput value={activeId} onChange={value => moveTo(moveItem, value)}>{groups.map(group => <option key={group.id} value={group.id}>{group.name || "New group"}</option>)}</SelectInput>
+              {moveItem && <label className="grid shrink-0 gap-2 text-sm">Move {moveItem} To
+                <SelectInput value={activeId} onChange={value => moveTo(moveItem, value)}>{groups.map(group => <option key={group.id} value={group.id}>{group.name || "New Group"}</option>)}</SelectInput>
               </label>}
               {!!activeGroup.prefixes.length && <p className="shrink-0 text-xs text-on-surface-variant">Also matches names starting with {activeGroup.prefixes.join(", ")}.</p>}
             </fieldset>}
@@ -622,7 +626,7 @@ function GroupingProfiles({ onBusy }: { onBusy: (busy: boolean) => void }) {
     </div>
     <div className="mt-4 flex shrink-0 items-center justify-end gap-2 border-t border-outline-variant/30 pt-4">
       <button type="button" className={secondaryButtonClass} disabled={busy} onClick={() => choose(selected)}>Cancel</button>
-      <button className={primaryButtonClass} disabled={busy || !profiles}>{busy ? "Saving…" : "Save changes"}</button>
+      <button className={cn(primaryButtonClass, "min-w-32", notice && "bg-success text-background hover:bg-success")} aria-live="polite" disabled={busy || !profiles}>{busy ? "Saving…" : notice ? "Saved" : "Save Changes"}</button>
     </div>
   </form>;
 }
@@ -630,7 +634,7 @@ function GroupingProfiles({ onBusy }: { onBusy: (busy: boolean) => void }) {
 type DuplicateCopy = { id: string; title: string; completed: boolean; date?: string; flags: string[] };
 type DuplicateGroup = { key: string; name: string; keep: DuplicateCopy; copies: DuplicateCopy[] };
 
-function DuplicatePreview({ path, onRemoved }: { path: string; onRemoved: () => void }) {
+function DuplicatePreview({ path, onRemoved, onBusy }: { path: string; onRemoved: () => void; onBusy: (busy: boolean) => void }) {
   const [snapshot, setSnapshot] = useState<{ groups: DuplicateGroup[]; syncedAt: string | null }>();
   const groups = snapshot?.groups;
   const [error, setError] = useState("");
@@ -643,25 +647,31 @@ function DuplicatePreview({ path, onRemoved }: { path: string; onRemoved: () => 
   }))) ?? [];
   async function remove() {
     setRemoving(true);
+    onBusy(true);
     setError("");
     setResult("");
     try {
       const summary = await api<{ removed: number; skipped: number; failed: number }>(path + "/duplicates/remove", "POST", { proposed });
       setResult(`Removed ${summary.removed} · Skipped ${summary.skipped} · Failed ${summary.failed}`);
-      await load();
+      await load(false);
       if (summary.removed) onRemoved();
     } catch (error) {
       setError((error as Error).message);
     } finally {
       setRemoving(false);
+      onBusy(false);
       setConfirming(false);
     }
   }
-  async function load() {
+  async function load(refresh = true) {
     setBusy(true);
     setError("");
     try {
       setSnapshot(await api<{ groups: DuplicateGroup[]; syncedAt: string | null }>(path + "/duplicates"));
+      if (refresh) {
+        await api(path + "/refresh", "POST");
+        setSnapshot(await api<{ groups: DuplicateGroup[]; syncedAt: string | null }>(path + "/duplicates"));
+      }
     } catch (error) {
       setError((error as Error).message);
     } finally {
@@ -669,22 +679,23 @@ function DuplicatePreview({ path, onRemoved }: { path: string; onRemoved: () => 
     }
   }
   useEffect(() => { void load(); }, [path]);
-  return <SectionCard title="Duplicate preview" description="GraphRelay keeps an open copy when possible. Review the proposed removals before applying them to Microsoft To Do.">
+  return <div className="grid gap-4">
+    <p className="text-sm text-on-surface-variant">GraphRelay keeps an open copy when possible. Review the proposed removals before applying them to Microsoft To Do.</p>
     <div className="flex flex-wrap gap-2">
-      <button className={secondaryButtonClass} disabled={busy || removing} onClick={() => { setConfirming(false); setResult(""); void load(); }}>Refresh preview</button>
-      {!!proposed.length && !confirming && <button className={secondaryButtonClass} disabled={busy || removing} onClick={() => setConfirming(true)}>Remove proposed duplicates ({proposed.length})</button>}
+      <button className={secondaryButtonClass} disabled={busy || removing} onClick={() => { setConfirming(false); setResult(""); void load(); }}>Refresh Preview</button>
+      {!!proposed.length && !confirming && <button className={secondaryButtonClass} disabled={busy || removing} onClick={() => setConfirming(true)}>Remove Proposed Duplicates ({proposed.length})</button>}
     </div>
     {confirming && !removing && <div className="grid gap-2 rounded-lg border border-warning/35 p-3">
       <p>Remove {proposed.length} proposed {proposed.length === 1 ? "copy" : "copies"} from Microsoft To Do? Copies flagged for review will be skipped.</p>
       <div className="flex flex-wrap gap-2">
-        <button className={dangerButtonClass} onClick={() => void remove()}>Confirm removal</button>
+        <button className={dangerButtonClass} onClick={() => void remove()}>Confirm Removal</button>
         <button className={secondaryButtonClass} disabled={removing} onClick={() => setConfirming(false)}>Cancel</button>
       </div>
     </div>}
     {removing && <p role="status">Removing eligible duplicates…</p>}
     {result && <p role="status">{result}</p>}
     {error && <ErrorBanner message={error} />}
-    {busy && <p role="status">Loading saved preview…</p>}
+    {busy && <p role="status">Refreshing duplicates…</p>}
     {snapshot?.syncedAt === null && <p>Waiting for the first Microsoft sync.</p>}
     {snapshot?.syncedAt && <p className="text-xs text-on-surface-variant">Preview from {new Date(snapshot.syncedAt).toLocaleString()}</p>}
     {snapshot?.syncedAt && groups?.length === 0 && <p>No duplicate names found.</p>}
@@ -694,7 +705,7 @@ function DuplicatePreview({ path, onRemoved }: { path: string; onRemoved: () => 
         {[group.keep, ...group.copies].map(copy => <li key={copy.id} className="grid gap-1 py-2">
           <span className="break-words">{copy.title}</span>
           <span className="text-on-surface-variant">
-            {copy.id === group.keep.id ? "Keep" : copy.flags.length ? "Review before removing" : "Proposed removal"}
+            {copy.id === group.keep.id ? "Keep" : copy.flags.length ? "Review Before Removing" : "Proposed Removal"}
             {" · "}{copy.completed ? "Completed" : "Open"}
             {copy.date && " · " + new Date(/(?:Z|[+-]\d{2}:\d{2})$/i.test(copy.date) ? copy.date : copy.date + "Z").toLocaleString()}
           </span>
@@ -702,10 +713,11 @@ function DuplicatePreview({ path, onRemoved }: { path: string; onRemoved: () => 
         </li>)}
       </ul>
     </section>)}
-  </SectionCard>;
+  </div>;
 }
 
 function ListDetail({ list, refresh }: { list: List; refresh: () => Promise<void> }) {
+  const [duplicatesBusy, setDuplicatesBusy] = useState(false);
   const [settings, setSettings] = useState(false);
   const [showDuplicates, setShowDuplicates] = useState(false);
   const [itemRevision, setItemRevision] = useState(0);
@@ -716,6 +728,14 @@ function ListDetail({ list, refresh }: { list: List; refresh: () => Promise<void
   const [syncing, setSyncing] = useState(false);
   const [syncNotice, setSyncNotice] = useState("");
   const path = "/lists/" + encodeURIComponent(list.id);
+  useEffect(() => {
+    if (list.enrolled) return;
+    let current = true;
+    void api(path + "/refresh", "POST").then(() => {
+      if (current) { setItemRevision(value => value + 1); void refresh(); }
+    }).catch(error => { if (current) setError(error.message); });
+    return () => { current = false; };
+  }, [path, list.enrolled]);
   async function sync() {
     setSyncing(true);
     setError("");
@@ -749,9 +769,9 @@ function ListDetail({ list, refresh }: { list: List; refresh: () => Promise<void
     <Link to="/todo" className="text-sm text-on-surface-variant">← To Do</Link>
     <PageHeader title={list.displayName}>
       <button className={primaryButtonClass} disabled={syncing} onClick={() => void sync()}>{syncing ? "Syncing…" : "Sync Now"}</button>
-      <button className={secondaryButtonClass} onClick={() => setSettings(true)}>List settings</button>
-      <button className={secondaryButtonClass} aria-expanded={showDuplicates} onClick={() => setShowDuplicates(!showDuplicates)}>{showDuplicates ? "Hide duplicates" : "Preview duplicates"}</button>
-      <button className={secondaryButtonClass} disabled={loadingHistory} aria-expanded={!!history} onClick={() => void activity()}>{history ? "Hide activity" : "View activity"}</button>
+      {list.enrolled ? <button className={secondaryButtonClass} onClick={() => setSettings(true)}>List Settings</button> : <Link className={secondaryButtonClass} to={{ pathname: "/todo/enroll", search: new URLSearchParams({ list: list.id }).toString() }}>Enroll List</Link>}
+      <button className={secondaryButtonClass} aria-haspopup="dialog" onClick={() => setShowDuplicates(true)}>Duplicates</button>
+      <button className={secondaryButtonClass} disabled={loadingHistory} aria-expanded={!!history} onClick={() => void activity()}>{history ? "Hide Activity" : "View Activity"}</button>
     </PageHeader>
     <p className="text-sm text-on-surface-variant">{runStatus(list)}</p>
     {list.unenrollPending && <p className="text-sm text-warning">Unenrollment is unfinished. Open List settings to retry.</p>}
@@ -762,9 +782,11 @@ function ListDetail({ list, refresh }: { list: List; refresh: () => Promise<void
         {history.length ? history.map((item, index) => <li key={index}><time className="mr-2 text-on-surface-variant">{item.created} UTC</time>{item.message}</li>) : <li>No title changes yet.</li>}
       </ul>
     </SectionCard>}
-    {showDuplicates && <DuplicatePreview key={previewRevision} path={path} onRemoved={() => { setItemRevision(value => value + 1); setHistory(undefined); }} />}
+    {showDuplicates && <SettingsDialog title="Duplicates" tabs={[]} selected="" select={() => undefined} close={() => { if (!duplicatesBusy) setShowDuplicates(false); }}>
+      <DuplicatePreview key={previewRevision} path={path} onBusy={setDuplicatesBusy} onRemoved={() => { setItemRevision(value => value + 1); setHistory(undefined); void refresh(); }} />
+    </SettingsDialog>}
     <ItemAisles key={itemRevision} path={path} aisles={list.order} grouped={list.mode !== "off"} refresh={refresh} />
-    {settings && <ListSettings list={list} refresh={async () => { await refresh(); setItemRevision(value => value + 1); setPreviewRevision(value => value + 1); }} close={() => setSettings(false)} />}
+    {settings && list.enrolled && <ListSettings list={list} refresh={async () => { await refresh(); setItemRevision(value => value + 1); setPreviewRevision(value => value + 1); }} close={() => setSettings(false)} />}
   </Page>;
 }
 
@@ -787,13 +809,13 @@ function AvailableLists() {
   const { directory, error } = useListDirectory();
   const available = directory?.lists ?? [];
   const message = error || directory?.directoryError;
-  return <SectionCard title="Available to enroll">
+  return <SectionCard title="Available To Enroll">
     {message && <ErrorBanner message={message} />}
     {available.length ? <ul className="grid gap-2">
       {available.map(list => <li key={list.id}>
-        <Link to={{ pathname: "/todo/enroll", search: new URLSearchParams({ list: list.id }).toString() }} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-background-container-low px-4 py-3 hover:bg-background-bright">
+        <Link to={listUrl(list.id)} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-background-container-low px-4 py-3 hover:bg-background-bright">
           <span className="font-medium">{list.displayName}{list.isShared && <small className="ml-2 text-on-surface-variant">Shared</small>}</span>
-          <span className="text-sm text-on-surface-variant">Enroll →</span>
+          <span className="text-sm text-on-surface-variant">Open →</span>
         </Link>
       </li>)}
     </ul> : directory && (
@@ -839,31 +861,48 @@ function EnrollList({ refresh }: { refresh: () => Promise<void> }) {
   }
   return <Page className="space-y-5">
     <Link to="/todo" className="text-sm text-on-surface-variant">← To Do</Link>
-    <PageHeader title="Enroll a list">
-      {directory?.connected && <button className={secondaryButtonClass} disabled={directory.syncing} onClick={() => void refreshDirectory()}>{directory.syncing ? "Refreshing…" : "Refresh available lists"}</button>}
+    <PageHeader title="Enroll A List">
+      {directory?.connected && <button className={secondaryButtonClass} disabled={directory.syncing} onClick={() => void refreshDirectory()}>{directory.syncing ? "Refreshing…" : "Refresh Available Lists"}</button>}
     </PageHeader>
     {(error || directory?.directoryError) && <ErrorBanner message={error || directory!.directoryError} />}
     {directory && !directory.connected && <Link to="/settings">Connect Microsoft in Settings</Link>}
     {directory?.connected && !directory.directoryReady && <p>Waiting for GraphRelay to sync available Microsoft lists.</p>}
-    {available.length ? <SectionCard title="Choose a Microsoft To Do list">
-      <label className="grid gap-2 text-sm">Microsoft To Do list
+    {available.length ? <SectionCard title="Choose A Microsoft To Do List">
+      <label className="grid gap-2 text-sm">Microsoft To Do List
         <SelectInput value={list?.id ?? ""} onChange={value => setParams(value ? { list: value } : {}, { replace: true })}>
-          <option value="">Choose a list</option>
+          <option value="">Choose A List</option>
           {available.map(list => <option key={list.id} value={list.id}>{list.displayName}{list.isShared ? " (shared)" : ""}</option>)}
         </SelectInput>
       </label>
     </SectionCard> : directory?.directoryReady && <p>All available lists are enrolled.</p>}
     {list && <SectionCard title={list.displayName} description="Enrollment syncs the list into GraphRelay. You can enable automations later in List settings.">
-      <button className={primaryButtonClass} disabled={enrolling} onClick={() => void enroll()}>{enrolling ? "Enrolling…" : "Enroll list"}</button>
+      <button className={primaryButtonClass} disabled={enrolling} onClick={() => void enroll()}>{enrolling ? "Enrolling…" : "Enroll List"}</button>
     </SectionCard>}
   </Page>;
 }
 
-function EnrolledList({ lists, refresh }: { lists: List[]; refresh: () => Promise<void> }) {
+function ListPage({ lists, refresh }: { lists: List[]; refresh: () => Promise<void> }) {
   const { listId } = useParams();
-  const list = lists.find(list => list.enrolled && list.id === listId);
-  if (!list) return <Page><PageHeader title="List unavailable" /><Link to="/todo">Back to enrolled lists</Link></Page>;
-  return <ListDetail key={list.id} list={list} refresh={refresh} />;
+  const [view, setView] = useState<List>();
+  const [error, setError] = useState("");
+  async function reload() {
+    if (!listId) return;
+    const value = await api<List>("/lists/" + encodeURIComponent(listId));
+    setView(value);
+    await refresh();
+  }
+  useEffect(() => {
+    let current = true;
+    setView(undefined);
+    setError("");
+    if (listId) void api<List>("/lists/" + encodeURIComponent(listId)).then(value => {
+      if (current) setView(value);
+    }).catch(error => { if (current) setError(error.message); });
+    return () => { current = false; };
+  }, [listId]);
+  const list = lists.find(list => list.id === listId) ?? view;
+  if (list) return <ListDetail key={list.id} list={list} refresh={reload} />;
+  return <Page><PageHeader title="List" />{error ? <ErrorBanner message={error} /> : <PageLoading label="Loading saved list…" />}<Link to="/todo">Back To To Do</Link></Page>;
 }
 
 function ToDo() {
@@ -887,8 +926,8 @@ function ToDo() {
     {error && <Page><ErrorBanner message={error} /></Page>}
     <Routes>
       <Route index element={<Page className="space-y-5">
-        <PageHeader title="To Do"><Link className={secondaryButtonClass} to="/settings?tab=todo&section=general">To Do settings</Link><Link className={primaryButtonClass} to="/todo/enroll">Enroll a list</Link></PageHeader>
-        <SectionCard title="Enrolled lists">
+        <PageHeader title="To Do"><Link className={secondaryButtonClass} to="/settings?tab=todo&section=general">To Do Settings</Link><Link className={primaryButtonClass} to="/todo/enroll">Enroll A List</Link></PageHeader>
+        <SectionCard title="Enrolled Lists">
           {enrolled.length ? <ul className="grid gap-2">
             {enrolled.map(list => <li key={list.id}>
               <Link to={listUrl(list.id)} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-background-container-low px-4 py-3 hover:bg-background-bright">
@@ -901,8 +940,8 @@ function ToDo() {
         <AvailableLists />
       </Page>} />
       <Route path="enroll" element={<EnrollList refresh={refresh} />} />
-      <Route path=":listId" element={<EnrolledList lists={lists} refresh={refresh} />} />
-      <Route path=":listId/settings" element={<EnrolledList lists={lists} refresh={refresh} />} />
+      <Route path=":listId" element={<ListPage lists={lists} refresh={refresh} />} />
+      <Route path=":listId/settings" element={<ListPage lists={lists} refresh={refresh} />} />
     </Routes>
   </>;
 }
@@ -918,9 +957,9 @@ export default function App() {
   if (!session.signedIn) return <Login onLogin={refresh} />;
   return <Layout build={session.build} user={{ username: "Administrator", displayName: "Administrator" }} onLogout={() => void api("/logout", "POST").then(refresh).catch(error => setError(error.message))}>
     <Routes>
-      <Route path="/dashboard" element={<Page><PageHeader title="Dashboard" /><SectionCard title="Microsoft account companion" description="Manage Microsoft To Do lists and calendar subscriptions."><Link className={primaryButtonClass} to="/settings">Microsoft connection</Link></SectionCard></Page>} />
+      <Route path="/dashboard" element={<Page><PageHeader title="Dashboard" /><SectionCard title="Microsoft Account Companion" description="Manage Microsoft To Do lists and calendar subscriptions."><Link className={primaryButtonClass} to="/settings">Microsoft Connection</Link></SectionCard></Page>} />
       <Route path="/todo/*" element={<ToDo />} />
-      <Route path="/calendar" element={<Page><PageHeader title="Calendar Feeds" /><SectionCard title="Calendar feeds" description="The ms-ical integration is planned for a later milestone." /></Page>} />
+      <Route path="/calendar" element={<Page><PageHeader title="Calendar Feeds" /><SectionCard title="Calendar Feeds" description="The ms-ical integration is planned for a later milestone." /></Page>} />
       <Route path="/settings" element={<Settings build={session.build} />} />
       <Route path="*" element={<Navigate replace to="/dashboard" />} />
     </Routes>

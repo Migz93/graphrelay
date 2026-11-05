@@ -170,6 +170,7 @@ async function refreshDirectory() {
   }
 }
 const active = new Set<string>();
+const snapshotRefreshes = new Map<string, Promise<void>>();
 const unenrollKey = (id: string) => "unenroll:" + id;
 function log(listId: string, message: string) {
   db.prepare("INSERT INTO activity (list_id, message) VALUES (?, ?)").run(listId, message);
@@ -225,6 +226,9 @@ if (!read("grouping-files-migrated")) {
 }
 
 function planList(list: Enrolled, tasks: Task[], recoverTitles = false) {
+  if (!enrolledList(list.id)) return tasks.map(task => ({
+    ...task, base: task.title, aisle: "Other", rank: 0, next: task.title,
+  })).sort((a, b) => a.base.localeCompare(b.base) || a.id.localeCompare(b.id));
   const stored = db.prepare("SELECT task_id, base, applied FROM titles WHERE list_id = ?").all(list.id) as { task_id: string; base: string; applied: string }[];
   const originals = Object.fromEntries(stored.map(row => [row.task_id, row]));
   const pending = db.prepare("SELECT task_id, base, applied FROM pending_titles WHERE list_id = ?").all(list.id) as typeof stored;
@@ -629,18 +633,72 @@ app.put("/api/lists/:id", async (req, res) => {
 function enrolledList(id: string) {
   return db.prepare("SELECT * FROM lists WHERE id = ?").get(id) as Enrolled | undefined;
 }
-app.post("/api/lists/:id/sync", async (req, res) => {
-  const list = enrolledList(req.params.id);
+function knownList(id: string): Enrolled | undefined {
+  const enrolled = enrolledList(id);
+  if (enrolled) return enrolled;
+  const entry = localDirectory().find(list => list.id === id);
+  return entry ? { id, name: entry.displayName, mode: "off", aisle_order: "[]", auto_cleanup: 0 } : undefined;
+}
+app.get("/api/lists/:id", (req, res) => {
+  const list = knownList(req.params.id);
   if (!list) { res.sendStatus(404); return; }
-  if (active.has(list.id) || read(unenrollKey(list.id))) {
+  const enrolled = !!enrolledList(list.id);
+  res.json({
+    id: list.id, displayName: list.name, isShared: localDirectory().find(value => value.id === list.id)?.isShared,
+    enrolled, mode: list.mode, order: enrolled ? listProfile(list).groups.map(group => group.name) : [],
+    profileId: enrolled ? listProfile(list).id : "groceries", syncMinutes: Number(read(intervalKey(list.id))) || null,
+    autoCleanup: !!list.auto_cleanup, unenrollPending: !!read(unenrollKey(list.id)),
+    lastRun: enrolled ? read("last:" + list.id) : readSnapshot(list.id)?.syncedAt, error: read("error:" + list.id),
+  });
+});
+function refreshListSnapshot(list: Enrolled) {
+  let refresh = snapshotRefreshes.get(list.id);
+  if (!refresh) {
+    refresh = performSnapshotRefresh(list).finally(() => { snapshotRefreshes.delete(list.id); });
+    snapshotRefreshes.set(list.id, refresh);
+  }
+  return refresh;
+}
+async function performSnapshotRefresh(list: Enrolled) {
+  active.add(list.id);
+  try {
+    await syncSnapshot(list);
+    write("error:" + list.id, "");
+  } catch {
+    write("error:" + list.id, "Microsoft list could not be refreshed. Showing the last synced data.");
+    throw new Error("Run failed. Microsoft list could not be refreshed. Try again.");
+  } finally {
+    active.delete(list.id);
+    schedulePoll();
+  }
+}
+app.post("/api/lists/:id/refresh", async (req, res) => {
+  const list = knownList(req.params.id);
+  if (!list) { res.sendStatus(404); return; }
+  if ((active.has(list.id) && !snapshotRefreshes.has(list.id)) || read(unenrollKey(list.id))) {
+    res.status(409).json({ error: "This list is busy. Try again when the current action finishes." });
+    return;
+  }
+  await refreshListSnapshot(list);
+  res.sendStatus(204);
+});
+app.post("/api/lists/:id/sync", async (req, res) => {
+  const list = knownList(req.params.id);
+  if (!list) { res.sendStatus(404); return; }
+  if ((active.has(list.id) && !snapshotRefreshes.has(list.id)) || read(unenrollKey(list.id))) {
     res.status(409).json({ error: "This list is busy. Wait for the current run or finish unenrolling it." });
     return;
   }
-  await run(list, true);
+  if (enrolledList(list.id)) {
+    await snapshotRefreshes.get(list.id);
+    if (active.has(list.id)) { res.status(409).json({ error: "This list is already syncing." }); return; }
+    await run(enrolledList(list.id)!, true);
+  }
+  else await refreshListSnapshot(list);
   res.sendStatus(204);
 });
 app.get("/api/lists/:id/items", (req, res) => {
-  if (!enrolledList(req.params.id)) { res.sendStatus(404); return; }
+  if (!knownList(req.params.id)) { res.sendStatus(404); return; }
   const snapshot = readSnapshot(req.params.id);
   res.json({ items: snapshot?.items ?? [], completed: snapshot?.completed ?? [], syncedAt: snapshot?.syncedAt ?? null });
 });
@@ -746,7 +804,7 @@ async function syncSnapshot(list: Enrolled, tasks?: Task[]) {
   write("snapshot:" + list.id, JSON.stringify(snapshot));
 }
 app.get("/api/lists/:id/duplicates", (req, res) => {
-  if (!enrolledList(req.params.id)) { res.sendStatus(404); return; }
+  if (!knownList(req.params.id)) { res.sendStatus(404); return; }
   const snapshot = readSnapshot(req.params.id);
   res.json({ groups: snapshot?.duplicates ?? [], syncedAt: snapshot?.syncedAt ?? null });
 });
@@ -798,7 +856,7 @@ async function removeDuplicates(list: Enrolled, proposed?: ProposedDuplicate[]) 
 }
 
 app.post("/api/lists/:id/duplicates/remove", async (req, res) => {
-  const list = enrolledList(req.params.id);
+  const list = knownList(req.params.id);
   if (!list) { res.sendStatus(404); return; }
   const proposed = req.body?.proposed;
   if (!Array.isArray(proposed) || !proposed.length || !proposed.every(copy =>
@@ -822,6 +880,7 @@ app.post("/api/lists/:id/duplicates/remove", async (req, res) => {
   }
 });
 app.get("/api/lists/:id/activity", (req, res) => {
+  if (!knownList(req.params.id)) { res.sendStatus(404); return; }
   res.json(db.prepare("SELECT created, message FROM activity WHERE list_id = ? ORDER BY id DESC LIMIT 100").all(req.params.id));
 });
 app.use("/api", (_req, res) => { res.sendStatus(404); });
