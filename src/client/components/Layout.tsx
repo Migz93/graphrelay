@@ -10,7 +10,7 @@ export type BuildInfo = { version: string; channel: string; revision: string };
 const nav = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { to: "/todo", label: "To Do", icon: ListChecks },
-  { to: "/calendar", label: "Calendar Feeds", icon: CalendarDays },
+  { to: "/calendar", label: "Calendar", icon: CalendarDays },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 

@@ -4,15 +4,15 @@ import { CSS } from "@dnd-kit/utilities";
 import { cn } from "./lib/utils";
 import { compactMatches, groupingDraft, matchKey, moveMatch, removeGroup, type GroupDraft, type MatchGroup } from "./lib/groupingDraft";
 import { GripVertical, Minus, Plus, X } from "lucide-react";
-import { useDialogA11y } from "./hooks/useDialogA11y";
-import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import Layout, { type BuildInfo } from "./components/Layout";
 import { ErrorBanner, Page, PageHeader, PageLoading } from "./components/Page";
 import { dangerButtonClass, SectionCard, SelectInput, SettingRow, SettingToggle, TextInput, primaryButtonClass, secondaryButtonClass } from "./components/FormControls";
 
 import { api } from "./lib/api";
-import CalendarFeeds from "./CalendarFeeds";
+import CalendarFeeds, { CalendarSettings } from "./CalendarFeeds";
+import { SettingsDialog } from "./components/SettingsDialog";
 
 type Session = { configured: boolean } & ({ signedIn: false } | { signedIn: true; build: BuildInfo });
 type Connection = { account: string | null; calendarAccess: boolean; redirectUri: string; clientId: string | null; editable: boolean };
@@ -205,7 +205,7 @@ function MicrosoftSettings() {
         {connection.account && <p>Connected as {connection.account}</p>}
         <SettingRow label="Calendar Access" hint="Allow GraphRelay to read events for subscription feeds." action>
           {connection.calendarAccess
-            ? <Link className={secondaryButtonClass} to="/calendar">Open Calendar Feeds</Link>
+            ? <Link className={secondaryButtonClass} to="/calendar">Open Calendar</Link>
             : <button className={secondaryButtonClass} onClick={() => void connect(true)} disabled={busy || !connection.clientId || !onConfiguredOrigin}>Enable Calendar Access</button>}
         </SettingRow>
         {!onConfiguredOrigin && <p className="text-sm text-on-surface-variant">
@@ -233,12 +233,15 @@ function Settings({ build }: { build: BuildInfo }) {
   const [networkRevision, setNetworkRevision] = useState(0);
   const [params, setParams] = useSearchParams();
   const [busy, setBusy] = useState(false);
-  const tabs = [{ id: "general", label: "General" }, { id: "todo", label: "To Do" }, { id: "about", label: "About" }];
+  const tabs = [{ id: "general", label: "General" }, { id: "todo", label: "To Do" }, { id: "calendar", label: "Calendar" }, { id: "about", label: "About" }];
   const tab = tabs.some(value => value.id === params.get("tab")) ? params.get("tab")! : "general";
-  const section = params.get("section") === "groupings" ? "groupings" : "general";
+  const sections = [{ id: "general", label: "General" },
+    tab === "calendar" ? { id: "feeds", label: "Feeds" } : { id: "groupings", label: "Groupings" }];
+  const requestedSection = params.get("section");
+  const section = sections.some(value => value.id === requestedSection) ? requestedSection! : "general";
   function selectTab(value: string) {
     if (busy) return;
-    setParams(value === "todo" ? { tab: value, section } : { tab: value });
+    setParams(value === "todo" || value === "calendar" ? { tab: value, section: value === tab ? section : "general" } : { tab: value });
   }
   return <Page>
     <PageHeader title="Settings" />
@@ -256,14 +259,13 @@ function Settings({ build }: { build: BuildInfo }) {
       <NetworkSettings onSaved={() => setNetworkRevision(value => value + 1)} />
       <MicrosoftSettings key={networkRevision} />
     </div>}
-    {tab === "todo" && <>
-      <nav aria-label="To Do Settings Sections" className="mb-6 flex w-fit max-w-full gap-1 rounded-xl bg-background-container-high p-1">
-        {[{ id: "general", label: "General" }, { id: "groupings", label: "Groupings" }].map(value => <button key={value.id} type="button" disabled={busy} aria-pressed={section === value.id}
-          onClick={() => { if (!busy) setParams({ tab: "todo", section: value.id }); }}
-          className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-all ${section === value.id ? "bg-background-container text-on-surface shadow-sm" : "text-on-surface-variant hover:text-on-surface"}`}>{value.label}</button>)}
-      </nav>
-      {section === "general" ? <PollingSettings /> : <GroupingProfiles onBusy={setBusy} />}
-    </>}
+    {(tab === "todo" || tab === "calendar") && <nav aria-label={tab === "todo" ? "To Do Settings Sections" : "Calendar Settings Sections"} className="mb-6 flex w-fit max-w-full gap-1 rounded-xl bg-background-container-high p-1">
+      {sections.map(value => <button key={value.id} type="button" disabled={busy} aria-pressed={section === value.id}
+        onClick={() => { if (!busy) setParams({ tab, section: value.id }); }}
+        className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-all ${section === value.id ? "bg-background-container text-on-surface" : "text-on-surface-variant hover:text-on-surface"}`}>{value.label}</button>)}
+    </nav>}
+    {tab === "todo" && (section === "general" ? <PollingSettings /> : <GroupingProfiles onBusy={setBusy} />)}
+    {tab === "calendar" && <CalendarSettings key={section} section={section === "feeds" ? "feeds" : "general"} />}
     {tab === "about" && <SectionCard title="Build Information">
       <dl className="grid gap-3 text-sm">
         <div><dt className="text-on-surface-variant">Version</dt><dd>v{build.version}</dd></div>
@@ -369,25 +371,6 @@ function runStatus(list: List) {
 }
 
 type GroupingProfile = { id: string; name: string; grocery: boolean; usedBy: number; groups: MatchGroup[] };
-
-function SettingsDialog({ title, tabs, selected, select, close, children }: {
-  title: string; tabs: string[]; selected: string; select: (tab: string) => void; close: () => void; children: ReactNode;
-}) {
-  const id = useId();
-  const ref = useDialogA11y<HTMLDivElement>(true, close);
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm" onClick={close}>
-    <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={id} className="max-h-[90dvh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-outline-variant/20 bg-background-container p-4 shadow-xl sm:p-6" onClick={event => event.stopPropagation()}>
-      <div className="mb-4 flex shrink-0 items-center justify-between gap-2">
-        <h2 id={id} className="font-headline text-lg font-semibold">{title}</h2>
-        <button type="button" aria-label="Close Settings" data-overlay-initial-focus onClick={close} className="rounded-lg p-1.5 text-on-surface-variant hover:bg-background-container-high hover:text-on-surface"><X size={18} /></button>
-      </div>
-      {!!tabs.length && <div className="mb-5 flex shrink-0 flex-wrap gap-2 border-b border-outline-variant/30 pb-3" aria-label="Settings Sections">
-        {tabs.map(tab => <button key={tab} type="button" aria-pressed={selected === tab} className={selected === tab ? primaryButtonClass : secondaryButtonClass} onClick={() => select(tab)}>{tab}</button>)}
-      </div>}
-      {children}
-    </div>
-  </div>;
-}
 
 function ListSettings({ list, refresh, close }: { list: List; refresh: () => Promise<void>; close: () => void }) {
   const navigate = useNavigate();

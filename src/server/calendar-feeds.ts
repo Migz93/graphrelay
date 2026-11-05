@@ -4,7 +4,7 @@ import { Router } from "express";
 import ical from "ical-generator";
 import { findIana } from "windows-iana";
 
-type Calendar = { id: string; name: string; groupId?: string };
+type Calendar = { id: string; name: string; groupId?: string | null };
 type DateTime = { dateTime: string; timeZone: string };
 type CalendarEvent = {
   id: string;
@@ -21,17 +21,24 @@ type CalendarEvent = {
 type Feed = {
   id: number;
   account: string;
-  calendar_id: string;
-  group_id: string | null;
+  sources: string;
   name: string;
   token: string;
-  ics: string | null;
   synced_at: string | null;
   error: string | null;
+  interval_minutes: number | null;
+  past_days: number | null;
+  future_days: number | null;
+  revision: number;
 };
+type CalendarDefaults = { intervalMinutes: number; pastDays: number; futureDays: number };
 
 const day = 86_400_000;
-const refreshInterval = 15 * 60_000;
+const minute = 60_000;
+const intervals = [15, 30, 60, 120, 180, 360];
+const maxDays = 3650;
+const validDays = (value: unknown): value is number =>
+  typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= maxDays;
 
 function eventDate(value: DateTime) {
   return new Date(/(?:Z|[+-]\d\d:\d\d)$/i.test(value.dateTime) ? value.dateTime : value.dateTime + "Z");
@@ -80,83 +87,171 @@ export function createCalendarFeeds(db: Database.Database, options: {
   account: () => string | undefined;
   collection: <T>(path: string) => Promise<T[]>;
 }) {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS calendar_directory (account TEXT PRIMARY KEY, calendars TEXT NOT NULL);
+  const feedSchema = `
     CREATE TABLE IF NOT EXISTS calendar_feeds (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, account TEXT NOT NULL, calendar_id TEXT NOT NULL, group_id TEXT, name TEXT NOT NULL,
-      token TEXT NOT NULL UNIQUE, ics TEXT, synced_at TEXT, error TEXT, UNIQUE(account, calendar_id)
+      id INTEGER PRIMARY KEY AUTOINCREMENT, account TEXT NOT NULL, sources TEXT NOT NULL, name TEXT NOT NULL,
+      token TEXT NOT NULL UNIQUE, ics TEXT, synced_at TEXT, error TEXT, interval_minutes INTEGER,
+      past_days INTEGER, future_days INTEGER, revision INTEGER NOT NULL DEFAULT 0
     );
-  `);
+    CREATE INDEX IF NOT EXISTS calendar_feeds_account ON calendar_feeds(account);
+  `;
+  db.transaction(() => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS calendar_directory (account TEXT PRIMARY KEY, calendars TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS calendar_settings (
+        id INTEGER PRIMARY KEY CHECK (id = 1), interval_minutes INTEGER NOT NULL, past_days INTEGER NOT NULL, future_days INTEGER NOT NULL
+      );
+      INSERT OR IGNORE INTO calendar_settings VALUES (1, 120, 30, 365);
+    `);
+    const columns = db.pragma("table_info(calendar_feeds)") as { name: string }[];
+    const legacy = columns.some(column => column.name === "calendar_id");
+    if (legacy) db.exec("ALTER TABLE calendar_feeds RENAME TO calendar_feeds_legacy");
+    db.exec(feedSchema);
+    if (legacy) db.exec(`
+      INSERT INTO calendar_feeds (id, account, sources, name, token, ics, synced_at, error)
+      SELECT id, account, json_array(json_object('id', calendar_id, 'name', name, 'groupId', group_id)), name, token, ics, synced_at, error
+      FROM calendar_feeds_legacy;
+      DROP TABLE calendar_feeds_legacy;
+    `);
+  })();
   const admin = Router();
   const subscription = Router();
-  const feedList = db.prepare("SELECT * FROM calendar_feeds WHERE account = ? ORDER BY name");
+  const feedFields = "id, account, sources, name, token, synced_at, error, interval_minutes, past_days, future_days, revision";
+  const feedList = db.prepare("SELECT " + feedFields + " FROM calendar_feeds WHERE account = ? ORDER BY name");
+  const feedById = db.prepare("SELECT " + feedFields + " FROM calendar_feeds WHERE id = ? AND account = ?");
   const directory = db.prepare("SELECT calendars FROM calendar_directory WHERE account = ?");
+  const readDefaults = db.prepare("SELECT interval_minutes AS intervalMinutes, past_days AS pastDays, future_days AS futureDays FROM calendar_settings WHERE id = 1");
+  const defaults = () => readDefaults.get() as CalendarDefaults;
   const directoryErrors = new Map<string, string>();
   const refreshes = new Map<string, Promise<void>>();
-  const feedRefreshes = new Map<string, Promise<void>>();
+  const refreshingFeeds = new Set<string>();
+  const directoryAttempts = new Map<string, number>();
+  const feedAttempts = new Map<string, { at: number; revision: number }>();
+  let timer: NodeJS.Timeout | undefined;
+
   const localCalendars = (account: string) => JSON.parse((directory.get(account) as { calendars: string } | undefined)?.calendars ?? "[]") as Calendar[];
   const feeds = (account: string) => feedList.all(account) as Feed[];
+  const sources = (feed: Feed) => JSON.parse(feed.sources) as Calendar[];
+  const settings = () => ({ ...defaults(), intervals, maxDays });
 
   async function discover(account: string) {
     try {
       const calendars = await options.collection<Calendar>("me/calendars?$select=id,name");
       const unique = new Map(calendars.map(({ id, name }) => [id, { id, name } as Calendar]));
-      // Outlook can list additional calendars under groups, including shared family calendars.
       try {
         const groups = await options.collection<{ id: string }>("me/calendarGroups?$select=id");
         for (const group of groups) {
-          const calendars = await options.collection<Calendar>("me/calendarGroups/" + encodeURIComponent(group.id) + "/calendars?$select=id,name");
-          for (const { id, name } of calendars) if (!unique.has(id)) unique.set(id, { id, name, groupId: group.id });
+          try {
+            const calendars = await options.collection<Calendar>("me/calendarGroups/" + encodeURIComponent(group.id) + "/calendars?$select=id,name");
+            for (const { id, name } of calendars) if (!unique.has(id)) unique.set(id, { id, name, groupId: group.id });
+          } catch (error) {
+            if (!inaccessibleGroup(error)) throw error;
+          }
         }
       } catch (error) {
-        if (!(error instanceof Error) || !/^Microsoft Graph returned (403|404)\.$/.test(error.message)) throw error;
+        if (!inaccessibleGroup(error)) throw error;
       }
       if (options.account() !== account) return;
       db.prepare("INSERT OR REPLACE INTO calendar_directory VALUES (?, ?)").run(account, JSON.stringify([...unique.values()]));
       directoryErrors.delete(account);
     } catch {
       directoryErrors.set(account, "Calendars could not be refreshed. Check the Microsoft connection and try again.");
+    } finally {
+      directoryAttempts.set(account, Date.now());
     }
   }
 
-  function refreshFeed(feed: Feed) {
-    const current = feedRefreshes.get(feed.token);
-    if (current) return current;
-    const pending = (async () => {
-      try {
-        if (options.account() !== feed.account) return;
-        const now = Date.now();
-        const query = new URLSearchParams({
-          startDateTime: new Date(now - 30 * day).toISOString(),
-          endDateTime: new Date(now + 365 * day).toISOString(),
-          "$select": "id,subject,start,end,isAllDay,isCancelled,bodyPreview,location,originalStartTimeZone,originalEndTimeZone",
-        });
-        const events = await options.collection<CalendarEvent>(calendarPath(feed.calendar_id, feed.group_id) + "/calendarView?" + query);
-        if (options.account() !== feed.account) return;
-        db.prepare("UPDATE calendar_feeds SET ics = ?, synced_at = ?, error = NULL WHERE token = ?")
-          .run(renderCalendarFeed(feed.name, events), new Date().toISOString(), feed.token);
-      } catch {
-        db.prepare("UPDATE calendar_feeds SET error = ? WHERE token = ?")
-          .run("Feed refresh failed. The last successful version is kept.", feed.token);
-      }
-    })().finally(() => { feedRefreshes.delete(feed.token); });
-    feedRefreshes.set(feed.token, pending);
-    return pending;
+  function inaccessibleGroup(error: unknown) {
+    return error instanceof Error && /^Microsoft Graph returned (403|404)\.$/.test(error.message);
   }
 
-  function refresh() {
+  async function refreshFeed(feed: Feed, current: CalendarDefaults, known: Map<string, Calendar>) {
+    refreshingFeeds.add(feed.token);
+    try {
+      if (options.account() !== feed.account) return;
+      const today = Math.floor(Date.now() / day) * day;
+      const query = new URLSearchParams({
+        startDateTime: new Date(today - (feed.past_days ?? current.pastDays) * day).toISOString(),
+        endDateTime: new Date(today + ((feed.future_days ?? current.futureDays) + 1) * day).toISOString(),
+        "$select": "id,subject,start,end,isAllDay,isCancelled,bodyPreview,location,originalStartTimeZone,originalEndTimeZone",
+      });
+      const events: CalendarEvent[] = [];
+      for (const source of sources(feed)) {
+        if (options.account() !== feed.account) return;
+        const calendar = known.get(source.id) ?? source;
+        events.push(...await options.collection<CalendarEvent>(calendarPath(calendar.id, calendar.groupId) + "/calendarView?" + query));
+      }
+      if (options.account() !== feed.account) return;
+      db.prepare("UPDATE calendar_feeds SET ics = ?, synced_at = ?, error = NULL WHERE token = ? AND revision = ?")
+        .run(renderCalendarFeed(feed.name, events), new Date().toISOString(), feed.token, feed.revision);
+    } catch {
+      db.prepare("UPDATE calendar_feeds SET error = ? WHERE token = ? AND revision = ?")
+        .run("Feed refresh failed. Try refreshing again.", feed.token, feed.revision);
+    } finally {
+      refreshingFeeds.delete(feed.token);
+      if (feedById.get(feed.id, feed.account)) feedAttempts.set(feed.token, { at: Date.now(), revision: feed.revision });
+    }
+  }
+
+  function feedDue(feed: Feed, current: CalendarDefaults) {
+    const attempt = feedAttempts.get(feed.token);
+    const last = attempt?.revision === feed.revision ? attempt.at : Date.parse(feed.synced_at ?? "") || 0;
+    return last + (feed.interval_minutes ?? current.intervalMinutes) * minute;
+  }
+
+  function directoryDue(account: string, current: CalendarDefaults) {
+    return (directoryAttempts.get(account) ?? 0) + current.intervalMinutes * minute;
+  }
+
+  function schedule() {
+    clearTimeout(timer);
+    const account = options.account();
+    if (!account || refreshes.has(account)) return;
+    const current = defaults();
+    const due = feeds(account).reduce((earliest, feed) => Math.min(earliest, feedDue(feed, current)), directoryDue(account, current));
+    timer = setTimeout(() => void refresh(false), Math.max(0, due - Date.now())).unref();
+  }
+
+  function refresh(force = true) {
     const account = options.account();
     if (!account) return Promise.resolve();
     const current = refreshes.get(account);
     if (current) return current;
     const pending = (async () => {
-      await discover(account);
+      if (force || directoryDue(account, defaults()) <= Date.now()) await discover(account);
       if (options.account() !== account) return;
-      for (const feed of feeds(account)) await refreshFeed(feed);
-    })().finally(() => { refreshes.delete(account); });
+      const known = new Map(localCalendars(account).map(calendar => [calendar.id, calendar]));
+      for (const { id } of feeds(account)) {
+        const feed = feedById.get(id, account) as Feed | undefined;
+        const current = defaults();
+        if (feed && (force || feedDue(feed, current) <= Date.now())) await refreshFeed(feed, current, known);
+      }
+    })().finally(() => {
+      refreshes.delete(account);
+      schedule();
+    });
     refreshes.set(account, pending);
     return pending;
   }
+
+  admin.get("/settings", (_req, res) => { res.json(settings()); });
+  admin.put("/settings", (req, res) => {
+    const current = defaults();
+    const { intervalMinutes = current.intervalMinutes, pastDays = current.pastDays, futureDays = current.futureDays } = req.body ?? {};
+    if (!intervals.includes(intervalMinutes) || !validDays(pastDays) || !validDays(futureDays)) {
+      res.status(400).json({ error: "Choose a refresh interval and enter whole day counts from 0 to " + maxDays + "." });
+      return;
+    }
+    db.transaction(() => {
+      db.prepare("UPDATE calendar_settings SET interval_minutes = ?, past_days = ?, future_days = ? WHERE id = 1").run(intervalMinutes, pastDays, futureDays);
+      db.prepare(`
+        UPDATE calendar_feeds SET ics = NULL, synced_at = NULL, error = NULL, revision = revision + 1
+        WHERE (? AND past_days IS NULL) OR (? AND future_days IS NULL)
+      `).run(Number(pastDays !== current.pastDays), Number(futureDays !== current.futureDays));
+    })();
+    schedule();
+    res.json(settings());
+  });
 
   admin.get("/", (_req, res) => {
     const account = options.account();
@@ -164,10 +259,12 @@ export function createCalendarFeeds(db: Database.Database, options: {
       connected: !!account,
       refreshing: !!account && refreshes.has(account),
       error: account ? directoryErrors.get(account) : undefined,
+      settings: settings(),
       calendars: account ? localCalendars(account) : [],
       feeds: account ? feeds(account).map(feed => ({
-        id: feed.id, calendarId: feed.calendar_id, name: feed.name, path: "/calendar-feeds/" + feed.token + ".ics",
-        syncedAt: feed.synced_at, error: feed.error, refreshing: feedRefreshes.has(feed.token),
+        id: feed.id, sources: sources(feed), name: feed.name, path: "/calendar-feeds/" + feed.token + ".ics",
+        syncedAt: feed.synced_at, error: feed.error, refreshing: refreshingFeeds.has(feed.token),
+        intervalMinutes: feed.interval_minutes, pastDays: feed.past_days, futureDays: feed.future_days,
       })) : [],
     });
   });
@@ -176,38 +273,83 @@ export function createCalendarFeeds(db: Database.Database, options: {
     void refresh();
     res.status(202).json({ refreshing: true });
   });
+
+  function draft(body: { name?: unknown; calendarIds?: unknown; intervalMinutes?: unknown; pastDays?: unknown; futureDays?: unknown }, account: string, existing?: Feed) {
+    const { name, calendarIds, intervalMinutes = null, pastDays = null, futureDays = null } = body;
+    if (typeof name !== "string" || !name.trim() || name.trim().length > 100 || !Array.isArray(calendarIds)
+      || !calendarIds.length || calendarIds.some(id => typeof id !== "string")
+      || (intervalMinutes !== null && (typeof intervalMinutes !== "number" || !intervals.includes(intervalMinutes)))
+      || (pastDays !== null && !validDays(pastDays)) || (futureDays !== null && !validDays(futureDays))) return;
+    const known = new Map([...(existing ? sources(existing) : []), ...localCalendars(account)].map(calendar => [calendar.id, calendar]));
+    const selected = [...new Set(calendarIds)].map(id => known.get(id));
+    if (selected.some(calendar => !calendar)) return;
+    return { name: name.trim(), selected: selected as Calendar[], intervalMinutes, pastDays, futureDays };
+  }
+
+  const draftError = "Enter a feed name, select at least one calendar, and use valid refresh and day settings.";
   admin.post("/", (req, res) => {
     const account = options.account();
     if (!account) { res.status(409).json({ error: "Enable Calendar Access in Microsoft settings first." }); return; }
-    const calendar = localCalendars(account).find(calendar => calendar.id === req.body?.calendarId);
-    if (!calendar) { res.status(404).json({ error: "Refresh calendars before creating this feed." }); return; }
-    const token = randomBytes(32).toString("hex");
-    const result = db.prepare("INSERT OR IGNORE INTO calendar_feeds (account, calendar_id, group_id, name, token) VALUES (?, ?, ?, ?, ?)")
-      .run(account, calendar.id, calendar.groupId ?? null, calendar.name, token);
-    if (result.changes) {
-      const feed = db.prepare("SELECT * FROM calendar_feeds WHERE token = ?").get(token) as Feed;
-      void refreshFeed(feed);
+    // Accept the original one-calendar create request as well as a named feed.
+    const legacy = req.body?.calendarId && localCalendars(account).find(calendar => calendar.id === req.body.calendarId);
+    const input = draft(legacy ? { name: legacy.name, calendarIds: [legacy.id] } : req.body ?? {}, account);
+    if (!input) { res.status(400).json({ error: draftError }); return; }
+    if (legacy && feeds(account).some(feed => sources(feed).length === 1 && sources(feed)[0].id === legacy.id)) {
+      res.sendStatus(204);
+      return;
     }
+    db.prepare(`
+      INSERT INTO calendar_feeds (account, sources, name, token, interval_minutes, past_days, future_days) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(account, JSON.stringify(input.selected), input.name, randomBytes(32).toString("hex"), input.intervalMinutes, input.pastDays, input.futureDays);
+    schedule();
+    res.sendStatus(204);
+  });
+  admin.put("/:id", (req, res) => {
+    const account = options.account();
+    const feed = account ? feedById.get(req.params.id, account) as Feed | undefined : undefined;
+    if (!account || !feed) { res.sendStatus(404); return; }
+    const input = draft(req.body ?? {}, account, feed);
+    if (!input) { res.status(400).json({ error: draftError }); return; }
+    const current = defaults();
+    const oldIds = new Set(sources(feed).map(calendar => calendar.id));
+    const sourcesChanged = oldIds.size !== input.selected.length || input.selected.some(calendar => !oldIds.has(calendar.id));
+    const windowChanged = (feed.past_days ?? current.pastDays) !== (input.pastDays ?? current.pastDays)
+      || (feed.future_days ?? current.futureDays) !== (input.futureDays ?? current.futureDays);
+    const invalidate = sourcesChanged || windowChanged;
+    const rebuild = invalidate || feed.name !== input.name;
+    db.prepare(`
+      UPDATE calendar_feeds SET name = ?, sources = ?, interval_minutes = ?, past_days = ?, future_days = ?,
+        ics = CASE WHEN ? THEN NULL ELSE ics END,
+        synced_at = CASE WHEN ? THEN NULL ELSE synced_at END,
+        error = CASE WHEN ? THEN NULL ELSE error END, revision = revision + ?
+      WHERE id = ? AND account = ?
+    `).run(input.name, JSON.stringify(input.selected), input.intervalMinutes, input.pastDays, input.futureDays,
+      Number(invalidate), Number(rebuild), Number(rebuild), Number(rebuild), feed.id, account);
+    schedule();
     res.sendStatus(204);
   });
   admin.delete("/:id", (req, res) => {
     const account = options.account();
-    if (account) db.prepare("DELETE FROM calendar_feeds WHERE id = ? AND account = ?").run(req.params.id, account);
+    const feed = account ? feedById.get(req.params.id, account) as Feed | undefined : undefined;
+    if (feed) {
+      db.prepare("DELETE FROM calendar_feeds WHERE id = ?").run(feed.id);
+      feedAttempts.delete(feed.token);
+      schedule();
+    }
     res.sendStatus(204);
   });
   subscription.get("/:token.ics", (req, res) => {
     const account = options.account();
     const token = req.params.token;
     const feed = account && /^[a-f0-9]{64}$/.test(token)
-      ? db.prepare("SELECT ics FROM calendar_feeds WHERE token = ? AND account = ?").get(token, account) as Pick<Feed, "ics"> | undefined
+      ? db.prepare("SELECT ics FROM calendar_feeds WHERE token = ? AND account = ?").get(token, account) as { ics: string | null } | undefined
       : undefined;
     res.set("Cache-Control", "no-store");
     if (!feed) { res.sendStatus(404); return; }
-    if (feed.ics === null) { res.set("Retry-After", "60").status(503).send("Waiting for the first calendar sync."); return; }
+    if (feed.ics === null) { res.set("Retry-After", "60").status(503).send("Waiting for a calendar sync."); return; }
     res.type("text/calendar; charset=utf-8").send(feed.ics);
   });
 
-  setTimeout(() => void refresh(), 0).unref();
-  setInterval(() => void refresh(), refreshInterval).unref();
+  schedule();
   return { admin, subscription, refresh };
 }

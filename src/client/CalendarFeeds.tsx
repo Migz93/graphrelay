@@ -1,19 +1,159 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { ErrorBanner, Page, PageHeader, PageLoading } from "./components/Page";
-import { SectionCard, dangerButtonClass, primaryButtonClass, secondaryButtonClass } from "./components/FormControls";
+import { SectionCard, SelectInput, TextInput, dangerButtonClass, primaryButtonClass, secondaryButtonClass } from "./components/FormControls";
+import { SettingsDialog } from "./components/SettingsDialog";
 import { api } from "./lib/api";
 
-type Feed = { id: number; calendarId: string; name: string; path: string; syncedAt: string | null; error: string | null; refreshing: boolean };
-type CalendarStatus = {
-  connected: boolean;
+type Defaults = { intervalMinutes: number; pastDays: number; futureDays: number; intervals: number[]; maxDays: number };
+type Calendar = { id: string; name: string };
+type Feed = {
+  id: number;
+  name: string;
+  sources: Calendar[];
+  path: string;
+  syncedAt: string | null;
+  error: string | null;
   refreshing: boolean;
-  error?: string;
-  calendars: { id: string; name: string }[];
-  feeds: Feed[];
+  intervalMinutes: number | null;
+  pastDays: number | null;
+  futureDays: number | null;
 };
+type CalendarStatus = { connected: boolean; refreshing: boolean; error?: string; settings: Defaults; calendars: Calendar[]; feeds: Feed[] };
 
-function FeedLink({ feed, busy, onRemove }: { feed: Feed; busy: boolean; onRemove: () => void }) {
+const intervalLabel = (minutes: number) => minutes < 60 ? minutes + " minutes" : minutes / 60 + (minutes === 60 ? " hour" : " hours");
+
+function RefreshInterval({ value, change, settings, inherit = false }: {
+  value: string; change: (value: string) => void; settings: Defaults; inherit?: boolean;
+}) {
+  return <label className="grid gap-2 text-sm">Refresh Interval
+    <SelectInput value={value} onChange={change}>
+      {inherit && <option value="">Use Global Default ({intervalLabel(settings.intervalMinutes)})</option>}
+      {settings.intervals.map(minutes => <option key={minutes} value={minutes}>{intervalLabel(minutes)}</option>)}
+    </SelectInput>
+  </label>;
+}
+
+function FeedWindow({ past, future, setPast, setFuture, settings, inherit = false }: {
+  past: string; future: string; setPast: (value: string) => void; setFuture: (value: string) => void; settings: Defaults; inherit?: boolean;
+}) {
+  return <div className="grid gap-4 sm:grid-cols-2">
+    <label className="grid gap-2 text-sm">Previous Days
+      <TextInput type="number" min={0} max={settings.maxDays} step={1} required={!inherit} value={past} onChange={setPast}
+        placeholder={inherit ? "Global default (" + settings.pastDays + ")" : undefined} />
+    </label>
+    <label className="grid gap-2 text-sm">Days Ahead
+      <TextInput type="number" min={0} max={settings.maxDays} step={1} required={!inherit} value={future} onChange={setFuture}
+        placeholder={inherit ? "Global default (" + settings.futureDays + ")" : undefined} />
+    </label>
+  </div>;
+}
+
+export function CalendarSettings({ section }: { section: "general" | "feeds" }) {
+  const [settings, setSettings] = useState<Defaults>();
+  const [interval, setIntervalValue] = useState("");
+  const [past, setPast] = useState("");
+  const [future, setFuture] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  function apply(value: Defaults) {
+    setSettings(value);
+    setIntervalValue(String(value.intervalMinutes));
+    setPast(String(value.pastDays));
+    setFuture(String(value.futureDays));
+  }
+  useEffect(() => {
+    void api<Defaults>("/calendar-feeds/settings").then(apply).catch(error => setError(error.message));
+  }, []);
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setNotice("");
+    setError("");
+    try {
+      const body = section === "general" ? { intervalMinutes: Number(interval) } : { pastDays: Number(past), futureDays: Number(future) };
+      apply(await api<Defaults>("/calendar-feeds/settings", "PUT", body));
+      setNotice("Calendar settings saved.");
+    } catch (error) {
+      setError((error as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return <SectionCard title={section === "general" ? "Calendar Refresh" : "Feed Date Range"}
+    description={section === "general" ? "How often GraphRelay checks for calendars and refreshes feeds that use the global interval." : "Set how many days before and after today each feed includes by default."}>
+    {error && <ErrorBanner message={error} />}
+    {settings && <form className="grid gap-4" onSubmit={save} onChange={() => setNotice("")}>
+      {section === "general" ? <RefreshInterval value={interval} change={setIntervalValue} settings={settings} />
+        : <FeedWindow past={past} future={future} setPast={setPast} setFuture={setFuture} settings={settings} />}
+      <div><button className={primaryButtonClass} disabled={busy}>{busy ? "Saving…" : "Save Changes"}</button></div>
+      {notice && <p role="status" className="text-sm text-success">{notice}</p>}
+    </form>}
+  </SectionCard>;
+}
+
+function FeedEditor({ feed, calendars, settings, close, saved }: {
+  feed?: Feed; calendars: Calendar[]; settings: Defaults; close: () => void; saved: () => Promise<void>;
+}) {
+  const [name, setName] = useState(feed?.name ?? "");
+  const [selected, setSelected] = useState(feed?.sources.map(source => source.id) ?? []);
+  const [interval, setIntervalValue] = useState(String(feed?.intervalMinutes ?? ""));
+  const [past, setPast] = useState(String(feed?.pastDays ?? ""));
+  const [future, setFuture] = useState(String(feed?.futureDays ?? ""));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const known = new Set(calendars.map(calendar => calendar.id));
+  const choices = [...calendars, ...(feed?.sources.filter(source => !known.has(source.id)) ?? [])];
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      await api("/calendar-feeds" + (feed ? "/" + feed.id : ""), feed ? "PUT" : "POST", {
+        name, calendarIds: selected, intervalMinutes: interval === "" ? null : Number(interval),
+        pastDays: past === "" ? null : Number(past), futureDays: future === "" ? null : Number(future),
+      });
+      close();
+      await saved();
+    } catch (error) {
+      setError((error as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return <SettingsDialog title={feed ? "Feed Settings" : "Create Calendar Feed"} tabs={[]} selected="" select={() => undefined} close={() => { if (!busy) close(); }}>
+    <form className="grid gap-4" onSubmit={save}>
+      {error && <ErrorBanner message={error} />}
+      <label className="grid gap-2 text-sm">Feed Name
+        <TextInput value={name} onChange={setName} required maxLength={100} />
+      </label>
+      <fieldset className="min-w-0 space-y-2">
+        <legend className="mb-2 text-sm">Source Calendars</legend>
+        <div className="grid max-h-48 gap-2 overflow-y-auto">
+          {choices.map(calendar => <label key={calendar.id} className="flex min-w-0 items-center gap-2 rounded-lg bg-background-container-low p-2 text-sm">
+            <input type="checkbox" className="accent-primary" checked={selected.includes(calendar.id)}
+              onChange={event => setSelected(current => event.target.checked ? [...current, calendar.id] : current.filter(id => id !== calendar.id))} />
+            <span className="min-w-0 break-words">{calendar.name}{!known.has(calendar.id) && " (unavailable)"}</span>
+          </label>)}
+        </div>
+      </fieldset>
+      <RefreshInterval value={interval} change={setIntervalValue} settings={settings} inherit />
+      <FeedWindow past={past} future={future} setPast={setPast} setFuture={setFuture} settings={settings} inherit />
+      <p className="text-sm text-on-surface-variant">Leave day counts empty to use the global defaults.</p>
+      <div className="flex flex-wrap gap-2">
+        <button className={primaryButtonClass} disabled={busy || !name.trim() || !selected.length}>
+          {busy ? "Saving…" : feed ? "Save Feed Settings" : "Create Feed"}
+        </button>
+        <button type="button" className={secondaryButtonClass} disabled={busy} onClick={close}>Cancel</button>
+      </div>
+    </form>
+  </SettingsDialog>;
+}
+
+function FeedLink({ feed, settings, busy, onEdit, onRemove }: {
+  feed: Feed; settings: Defaults; busy: boolean; onEdit: () => void; onRemove: () => void;
+}) {
   const [confirm, setConfirm] = useState(false);
   const [notice, setNotice] = useState("");
   const input = useRef<HTMLInputElement>(null);
@@ -29,9 +169,15 @@ function FeedLink({ feed, busy, onRemove }: { feed: Feed; busy: boolean; onRemov
     }
   }
   return <article className="grid min-w-0 gap-3 rounded-lg border border-outline-variant/30 p-4">
-    <h3 className="break-words font-semibold">{feed.name}</h3>
+    <div className="grid min-w-0 gap-1">
+      <h3 className="break-words font-semibold">{feed.name}</h3>
+      <p className="break-words text-sm text-on-surface-variant">{feed.sources.map(source => source.name).join(", ")}</p>
+      <p className="text-sm text-on-surface-variant">
+        Every {intervalLabel(feed.intervalMinutes ?? settings.intervalMinutes)} · {feed.pastDays ?? settings.pastDays} days back · {feed.futureDays ?? settings.futureDays} days ahead
+      </p>
+    </div>
     <p className="text-sm text-on-surface-variant">
-      {feed.refreshing ? "Refreshing feed…" : feed.syncedAt ? "Last synced · " + new Date(feed.syncedAt).toLocaleString() : "Waiting for the first calendar sync."}
+      {feed.refreshing ? "Refreshing feed…" : feed.syncedAt ? "Last synced · " + new Date(feed.syncedAt).toLocaleString() : "Waiting for a calendar sync."}
     </p>
     {feed.error && <ErrorBanner message={feed.error} />}
     <label className="grid min-w-0 gap-2 text-sm">Subscription URL
@@ -39,6 +185,7 @@ function FeedLink({ feed, busy, onRemove }: { feed: Feed; busy: boolean; onRemov
     </label>
     <div className="flex flex-wrap gap-2">
       <button className={secondaryButtonClass} onClick={() => void copy()}>Copy Link</button>
+      <button className={secondaryButtonClass} disabled={busy} onClick={onEdit}>Settings</button>
       <button className={dangerButtonClass} disabled={busy} onClick={() => confirm ? onRemove() : setConfirm(true)}>
         {confirm ? "Confirm Revoke Link" : "Revoke Link"}
       </button>
@@ -52,6 +199,7 @@ export default function CalendarFeeds() {
   const [status, setStatus] = useState<CalendarStatus>();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [editor, setEditor] = useState<Feed | "new">();
   useEffect(() => {
     let active = true;
     const load = () => api<CalendarStatus>("/calendar-feeds").then(value => {
@@ -63,12 +211,19 @@ export default function CalendarFeeds() {
     const timer = setInterval(() => void load(), 3000);
     return () => { active = false; clearInterval(timer); };
   }, []);
-  async function change(path: string, method: string, body?: object) {
+  async function load() {
+    try {
+      setStatus(await api<CalendarStatus>("/calendar-feeds"));
+    } catch (error) {
+      setError((error as Error).message);
+    }
+  }
+  async function change(path: string, method: string) {
     setError("");
     setBusy(true);
     try {
-      await api("/calendar-feeds" + path, method, body);
-      setStatus(await api<CalendarStatus>("/calendar-feeds"));
+      await api("/calendar-feeds" + path, method);
+      await load();
     } catch (error) {
       setError((error as Error).message);
     } finally {
@@ -76,31 +231,28 @@ export default function CalendarFeeds() {
     }
   }
 
-  const available = status?.calendars.filter(calendar => !status.feeds.some(feed => feed.calendarId === calendar.id)) ?? [];
   return <Page className="space-y-5">
-    <PageHeader title="Calendar Feeds">
-      {status?.connected && <button className={secondaryButtonClass} disabled={busy || status.refreshing} onClick={() => void change("/refresh", "POST")}>
-        {status.refreshing ? "Refreshing…" : "Refresh Calendars"}
-      </button>}
+    <PageHeader title="Calendar">
+      {status?.connected && <>
+        <button className={primaryButtonClass} disabled={busy || !status.calendars.length} onClick={() => setEditor("new")}>Create Feed</button>
+        <button className={secondaryButtonClass} disabled={busy || status.refreshing} onClick={() => void change("/refresh", "POST")}>
+          {status.refreshing ? "Refreshing…" : "Refresh Calendars"}
+        </button>
+      </>}
     </PageHeader>
     {(error || status?.error) && <ErrorBanner message={error || status!.error!} />}
-    {!status && !error && <PageLoading label="Loading Calendar Feeds…" />}
+    {!status && !error && <PageLoading label="Loading Calendars…" />}
     {status && !status.connected && <SectionCard title="Microsoft Calendar Access" description="Enable read access for your existing Microsoft connection to discover calendars.">
       <div><Link to="/settings" className={primaryButtonClass}>Open Microsoft Settings</Link></div>
     </SectionCard>}
     {status?.connected && <>
-      <SectionCard title="Subscription Feeds" description="Subscribe to a link from your calendar app. Anyone who has the link can read its events.">
-        {status.feeds.length ? status.feeds.map(feed => <FeedLink key={feed.id} feed={feed} busy={busy} onRemove={() => void change("/" + feed.id, "DELETE")} />)
-          : <p>No subscription feeds yet.</p>}
+      <SectionCard title="Subscription Feeds" description="Create a subscription link for one or more calendars. Anyone who has the link can read its events.">
+        {status.feeds.length ? status.feeds.map(feed => <FeedLink key={feed.id} feed={feed} settings={status.settings} busy={busy}
+          onEdit={() => setEditor(feed)} onRemove={() => void change("/" + feed.id, "DELETE")} />)
+          : <p>{status.refreshing && !status.calendars.length ? "Discovering calendars…" : "No subscription feeds yet."}</p>}
       </SectionCard>
-      <SectionCard title="Microsoft Calendars" description="Create a feed for a calendar. GraphRelay caches the last 30 days and the next year of events and refreshes every 15 minutes.">
-        {available.length ? <ul className="grid gap-2">
-          {available.map(calendar => <li key={calendar.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-background-container-low px-4 py-3">
-            <span className="min-w-0 break-words font-medium">{calendar.name}</span>
-            <button className={primaryButtonClass} disabled={busy} aria-label={"Create Feed for " + calendar.name} onClick={() => void change("", "POST", { calendarId: calendar.id })}>Create Feed</button>
-          </li>)}
-        </ul> : <p>{status.refreshing ? "Discovering calendars…" : status.calendars.length ? "Every available calendar has a feed." : "No calendars found. Refresh calendars to check Microsoft."}</p>}
-      </SectionCard>
+      {editor && <FeedEditor feed={editor === "new" ? undefined : editor} calendars={status.calendars} settings={status.settings}
+        close={() => setEditor(undefined)} saved={load} />}
     </>}
   </Page>;
 }
