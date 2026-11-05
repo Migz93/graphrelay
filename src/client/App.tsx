@@ -102,6 +102,51 @@ function PollingSettings() {
   </SectionCard>;
 }
 
+type Network = { publicUrl: string; trustProxy: boolean; redirectUri: string };
+
+function NetworkSettings({ onSaved }: { onSaved: () => void }) {
+  const [settings, setSettings] = useState<Network>();
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  useEffect(() => {
+    void api<Network>("/network").then(setSettings).catch(error => setError(error.message));
+  }, []);
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    if (!settings) return;
+    setBusy(true);
+    setNotice("");
+    setError("");
+    try {
+      setSettings(await api<Network>("/network", "PUT", { publicUrl: settings.publicUrl, trustProxy: settings.trustProxy }));
+      setNotice("Network settings saved.");
+      onSaved();
+    } catch (error) {
+      setError((error as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return <SectionCard title="Network" description="Set the address you use to open GraphRelay and configure reverse proxy support.">
+    {error && <ErrorBanner message={error} />}
+    {settings && <form className="grid gap-4" onSubmit={save}>
+      <SettingToggle label="Trust Proxy" hint="Use forwarded HTTPS and client address information from one trusted reverse proxy." checked={settings.trustProxy}
+        onChange={trustProxy => { setNotice(""); setSettings({ ...settings, trustProxy }); }} />
+      <label className="grid gap-2 text-sm">Public URL
+        <TextInput type="url" value={settings.publicUrl} placeholder="https://graphrelay.example.com" disabled={busy} required
+          onChange={publicUrl => { setNotice(""); setSettings({ ...settings, publicUrl }); }} />
+      </label>
+      <label className="grid gap-2 text-sm">Microsoft Redirect URI
+        <TextInput readOnly value={settings.redirectUri} onChange={() => undefined} onFocus={event => event.currentTarget.select()} />
+        <span className="text-on-surface-variant">Add this exact URL as a Web redirect URI in Microsoft Entra.</span>
+      </label>
+      <div><button className={primaryButtonClass} disabled={busy}>{busy ? "Saving…" : "Save Network"}</button></div>
+      {notice && <p role="status" className="text-sm text-success">{notice}</p>}
+    </form>}
+  </SectionCard>;
+}
+
 function MicrosoftSettings() {
   const [connection, setConnection] = useState<Connection>();
   const [error, setError] = useState("");
@@ -141,6 +186,8 @@ function MicrosoftSettings() {
       setBusy(false);
     }
   }
+  const configuredOrigin = connection ? new URL(connection.redirectUri).origin : undefined;
+  const onConfiguredOrigin = window.location.origin === configuredOrigin;
   const outcome = params.get("connection");
   const reason = params.get("reason") ?? "";
   const signInError = reason === "session"
@@ -151,7 +198,7 @@ function MicrosoftSettings() {
     <SectionCard title="Microsoft Connection" description="Connect the Microsoft account for your To Do lists and calendars.">
       {connection && <>
         <SettingRow label="Account" action>
-          <button className={primaryButtonClass} onClick={() => void connect()} disabled={busy || !connection.clientId}>
+          <button className={primaryButtonClass} onClick={() => void connect()} disabled={busy || !connection.clientId || !onConfiguredOrigin}>
             {connection.account ? "Reconnect Microsoft" : "Connect Microsoft"}
           </button>
         </SettingRow>
@@ -159,9 +206,11 @@ function MicrosoftSettings() {
         <SettingRow label="Calendar Access" hint="Allow GraphRelay to read events for subscription feeds." action>
           {connection.calendarAccess
             ? <Link className={secondaryButtonClass} to="/calendar">Open Calendar Feeds</Link>
-            : <button className={secondaryButtonClass} onClick={() => void connect(true)} disabled={busy || !connection.clientId}>Enable Calendar Access</button>}
+            : <button className={secondaryButtonClass} onClick={() => void connect(true)} disabled={busy || !connection.clientId || !onConfiguredOrigin}>Enable Calendar Access</button>}
         </SettingRow>
-        <p className="break-all text-sm text-on-surface-variant">Redirect URI · {connection.redirectUri}</p>
+        {!onConfiguredOrigin && <p className="text-sm text-on-surface-variant">
+          Open <a className="break-all underline" href={configuredOrigin + "/settings"}>{configuredOrigin}</a> to connect Microsoft or update app credentials.
+        </p>}
         {connection.editable && <details open={!connection.clientId || outcome === "failed"}>
           <summary className="cursor-pointer text-sm">Microsoft App Credentials</summary>
           <form onSubmit={saveSecret} className="mt-3 grid gap-3">
@@ -181,6 +230,7 @@ function MicrosoftSettings() {
 }
 
 function Settings({ build }: { build: BuildInfo }) {
+  const [networkRevision, setNetworkRevision] = useState(0);
   const [params, setParams] = useSearchParams();
   const [busy, setBusy] = useState(false);
   const tabs = [{ id: "general", label: "General" }, { id: "todo", label: "To Do" }, { id: "about", label: "About" }];
@@ -202,7 +252,10 @@ function Settings({ build }: { build: BuildInfo }) {
       {tabs.map(value => <button key={value.id} type="button" disabled={busy} aria-pressed={tab === value.id} onClick={() => selectTab(value.id)}
         className={`flex-1 whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-all ${tab === value.id ? "bg-background-container text-on-surface shadow-sm" : "text-on-surface-variant hover:text-on-surface"}`}>{value.label}</button>)}
     </nav>
-    {tab === "general" && <MicrosoftSettings />}
+    {tab === "general" && <div className="space-y-5">
+      <NetworkSettings onSaved={() => setNetworkRevision(value => value + 1)} />
+      <MicrosoftSettings key={networkRevision} />
+    </div>}
     {tab === "todo" && <>
       <nav aria-label="To Do Settings Sections" className="mb-6 flex w-fit max-w-full gap-1 rounded-xl bg-background-container-high p-1">
         {[{ id: "general", label: "General" }, { id: "groupings", label: "Groupings" }].map(value => <button key={value.id} type="button" disabled={busy} aria-pressed={section === value.id}

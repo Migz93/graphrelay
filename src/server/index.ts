@@ -17,15 +17,13 @@ import { aisles, capitalizeWords, itemKey, planTitles, type Mode } from "./order
 declare module "express-session" {
   interface SessionData {
     admin?: boolean;
-    oauth?: { state: string; verifier: string; issued: number; calendars: boolean };
+    oauth?: { state: string; verifier: string; issued: number; calendars: boolean; redirectUri: string };
   }
 }
 
 const app = express();
 app.disable("x-powered-by");
 const env = process.env;
-const origin = new URL(env.PUBLIC_URL ?? "http://localhost:9304").origin;
-const redirectUri = origin + "/api/microsoft/callback";
 const dataDir = env.DATA_DIR ?? "/config";
 mkdirSync(dataDir, { recursive: true, mode: 0o700 });
 const keyFile = resolve(dataDir, "setup.key");
@@ -61,6 +59,25 @@ function read(key: string) {
 function write(key: string, value: string) {
   db.prepare("INSERT OR REPLACE INTO state VALUES (?, ?)").run(key, value);
 }
+type NetworkSettings = { publicUrl: string; trustProxy: boolean };
+const savedNetwork = read("network-settings");
+let network: NetworkSettings = savedNetwork ? JSON.parse(savedNetwork) : {
+  publicUrl: new URL(env.PUBLIC_URL ?? "http://localhost:9304").origin,
+  trustProxy: env.TRUST_PROXY === "1",
+};
+const microsoftRedirectUri = () => network.publicUrl + "/api/microsoft/callback";
+
+function normalizePublicUrl(input: unknown) {
+  if (typeof input !== "string" || !/^https?:\/\//i.test(input.trim())) return;
+  try {
+    const url = new URL(input.trim());
+    if (url.pathname !== "/" || url.username || url.password || url.search || url.hash) return;
+    if (url.protocol === "https:" || (url.protocol === "http:" && url.hostname === "localhost")) return url.origin;
+  } catch {
+    return;
+  }
+}
+
 function encrypt(value: string) {
   const iv = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", key, iv);
@@ -383,7 +400,7 @@ async function pollLists() {
 }
 schedulePoll(0);
 
-if (env.TRUST_PROXY === "1") app.set("trust proxy", 1);
+app.set("trust proxy", network.trustProxy ? 1 : false);
 const duplicateRemovalPath = "/api/lists/:id/duplicates/remove";
 app.post(duplicateRemovalPath, express.json({ limit: "512kb" }));
 app.use(express.json({ limit: "16kb" }));
@@ -392,7 +409,7 @@ app.use(session({
   secret: createHash("sha256").update(key).update("session").digest("hex"),
   resave: false,
   saveUninitialized: false,
-  cookie: { httpOnly: true, sameSite: "lax", secure: origin.startsWith("https:") },
+  cookie: { httpOnly: true, sameSite: "lax", secure: "auto" },
 }));
 app.get("/api/health", (_req, res) => { res.json({ ok: true }); });
 app.use("/api", (_req, res, next) => { res.set("Cache-Control", "no-store"); next(); });
@@ -411,7 +428,7 @@ app.use("/api", (req, res, next) => {
 });
 app.post("/api/setup", (req, res) => {
   if (adminConfigured()) { res.sendStatus(409); return; }
-  if (req.get("Origin") !== origin) { res.sendStatus(403); return; }
+  if (req.get("Origin") !== network.publicUrl) { res.sendStatus(403); return; }
   const { password } = req.body ?? {};
   if (typeof password !== "string" || !password.trim() || password.length > 256) {
     res.status(400).json({ error: "Enter an admin password of up to 256 characters." });
@@ -455,10 +472,26 @@ app.post("/api/logout", (req, res, next) => {
     res.sendStatus(204);
   });
 });
+const networkResponse = () => ({ ...network, redirectUri: microsoftRedirectUri() });
+app.get("/api/network", (_req, res) => { res.json(networkResponse()); });
+app.put("/api/network", (req, res) => {
+  const publicUrl = normalizePublicUrl(req.body?.publicUrl);
+  const trustProxy = req.body?.trustProxy;
+  if (!publicUrl || typeof trustProxy !== "boolean") {
+    res.status(400).json({ error: "Enter an HTTPS address such as https://graphrelay.example.com, or an HTTP localhost address. Use the base address only." });
+    return;
+  }
+  const settings = { publicUrl, trustProxy };
+  write("network-settings", JSON.stringify(settings));
+  network = settings;
+  app.set("trust proxy", trustProxy ? 1 : false);
+  res.json(networkResponse());
+});
+
 app.use("/api/calendar-feeds", calendarFeeds.admin);
-app.get("/api/microsoft", (_req, res) => { res.json({ account: read("username") ?? null, calendarAccess: !!calendarAccount(), redirectUri, clientId: setup?.clientId ?? (legacySetup ? env.MICROSOFT_CLIENT_ID : null), editable: !!setup }); });
+app.get("/api/microsoft", (_req, res) => { res.json({ account: read("username") ?? null, calendarAccess: !!calendarAccount(), redirectUri: microsoftRedirectUri(), clientId: setup?.clientId ?? (legacySetup ? env.MICROSOFT_CLIENT_ID : null), editable: !!setup }); });
 app.put("/api/microsoft", (req, res) => {
-  if (req.get("Origin") !== origin) { res.sendStatus(403); return; }
+  if (req.get("Origin") !== network.publicUrl) { res.sendStatus(403); return; }
   if (!setup) { res.sendStatus(409); return; }
   const clientId = typeof req.body?.clientId === "string" ? req.body.clientId.trim().toLowerCase() : "";
   const clientSecret = typeof req.body?.clientSecret === "string" ? req.body.clientSecret.trim() : "";
@@ -482,10 +515,16 @@ app.put("/api/microsoft", (req, res) => {
 });
 app.post("/api/microsoft/connect", async (req, res) => {
   if (!msal) { res.status(409).json({ error: "Save your Microsoft app credentials first." }); return; }
+  const requestOrigin = req.get("Origin");
+  if (requestOrigin && requestOrigin !== network.publicUrl) {
+    res.status(409).json({ error: "Open GraphRelay at " + network.publicUrl + " and sign in there before connecting Microsoft." });
+    return;
+  }
+  const redirectUri = microsoftRedirectUri();
   const state = randomBytes(32).toString("hex");
   const pkce = await new CryptoProvider().generatePkceCodes();
   const calendars = req.body?.calendarAccess === true || !!calendarAccount();
-  req.session.oauth = { state, verifier: pkce.verifier, issued: Date.now(), calendars };
+  req.session.oauth = { state, verifier: pkce.verifier, issued: Date.now(), calendars, redirectUri };
   const url = await msal!.getAuthCodeUrl({ scopes: calendars ? [...scopes, calendarScope] : scopes, redirectUri, state, codeChallenge: pkce.challenge, codeChallengeMethod: "S256", prompt: "select_account" });
   res.json({ url });
 });
@@ -499,12 +538,12 @@ app.get("/api/microsoft/callback", async (req, res) => {
     res.redirect("/settings?connection=failed&reason=" + (detail ?? code));
     return;
   }
-  if (!pending || Date.now() - pending.issued > 600_000 || req.query.state !== pending.state || typeof req.query.code !== "string") {
+  if (!pending || pending.redirectUri !== microsoftRedirectUri() || Date.now() - pending.issued > 600_000 || req.query.state !== pending.state || typeof req.query.code !== "string") {
     res.redirect("/settings?connection=failed&reason=session");
     return;
   }
   try {
-    const result = await msal!.acquireTokenByCode({ code: req.query.code, scopes: pending.calendars ? [...scopes, calendarScope] : scopes, redirectUri, codeVerifier: pending.verifier });
+    const result = await msal!.acquireTokenByCode({ code: req.query.code, scopes: pending.calendars ? [...scopes, calendarScope] : scopes, redirectUri: pending.redirectUri, codeVerifier: pending.verifier });
     if (!result.account) throw new Error("Missing Microsoft account.");
     const current = read("account");
     if (current && current !== result.account.homeAccountId && (db.prepare("SELECT 1 FROM lists LIMIT 1").get() || db.prepare("SELECT 1 FROM calendar_feeds WHERE account = ? LIMIT 1").get(current))) {
