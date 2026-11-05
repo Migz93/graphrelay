@@ -10,7 +10,7 @@ import { resolve } from "node:path";
 import { groceryItems } from "./groceries.js";
 import { GroupingStore, type Profile } from "./grouping-store.js";
 import { duplicateGroups } from "./duplicates.js";
-import { aisles, itemKey, planTitles, type Mode } from "./ordering.js";
+import { aisles, capitalizeWords, itemKey, planTitles, type Mode } from "./ordering.js";
 
 declare module "express-session" {
   interface SessionData {
@@ -180,6 +180,8 @@ function taskPath(listId: string) {
   return "me/todo/lists/" + encodeURIComponent(listId) + "/tasks";
 }
 const profileKey = (id: string) => "list-profile:" + id;
+const capitalizeItemsKey = (id: string) => "capitalize-items:" + id;
+const capitalizeItems = (id: string) => read(capitalizeItemsKey(id)) === "1";
 const intervalKey = (id: string) => "list-interval:" + id;
 const builtInProfile: Profile = { id: "groceries", name: "Groceries", grocery: true, groups: aisles.map(name => ({ name, matches: [] })) };
 const groupingStore = new GroupingStore(resolve(dataDir, "todo", "groupings"));
@@ -257,20 +259,24 @@ async function run(list: Enrolled, includeCleanup = false) {
     const path = taskPath(list.id);
     const tasks = await collection<Task>(path);
     let changed = 0;
+    const capitalize = capitalizeItems(list.id);
     for (const task of planList(list, tasks.filter(task => task.status !== "completed"), true)) {
-      if (task.title === task.next) continue;
+      // Format the item name independently of its grouping prefix.
+      const base = capitalize ? capitalizeWords(task.base) : task.base;
+      const next = task.next.slice(0, task.next.length - task.base.length) + base;
+      if (task.title === next) continue;
       const taskPath = path + "/" + encodeURIComponent(task.id);
       const current = await graph<Task>(taskPath);
       if (current.title !== task.title || current.status === "completed") continue;
-      db.prepare("INSERT OR REPLACE INTO pending_titles VALUES (?, ?, ?, ?)").run(list.id, task.id, task.base, task.next);
-      await graph(taskPath, { title: task.next });
+      db.prepare("INSERT OR REPLACE INTO pending_titles VALUES (?, ?, ?, ?)").run(list.id, task.id, base, next);
+      await graph(taskPath, { title: next });
       if (list.mode === "off") {
         db.prepare("DELETE FROM titles WHERE list_id = ? AND task_id = ?").run(list.id, task.id);
       } else {
-        db.prepare("INSERT OR REPLACE INTO titles VALUES (?, ?, ?, ?)").run(list.id, task.id, task.base, task.next);
+        db.prepare("INSERT OR REPLACE INTO titles VALUES (?, ?, ?, ?)").run(list.id, task.id, base, next);
       }
       db.prepare("DELETE FROM pending_titles WHERE list_id = ? AND task_id = ?").run(list.id, task.id);
-      log(list.id, task.title + " → " + task.next);
+      log(list.id, task.title + " → " + next);
       changed++;
     }
     const cleanup = includeCleanup && list.auto_cleanup ? await removeDuplicates(list) : undefined;
@@ -496,7 +502,7 @@ app.get("/api/lists", (_req, res) => {
   const directory = new Map(localDirectory().map(list => [list.id, list]));
   const lists = enrolled.map(list => ({
     id: list.id, displayName: list.name, isShared: directory.get(list.id)?.isShared,
-    enrolled: true, mode: list.mode, order: listProfile(list).groups.map(group => group.name), profileId: listProfile(list).id, syncMinutes: Number(read(intervalKey(list.id))) || null, autoCleanup: !!list.auto_cleanup,
+    enrolled: true, mode: list.mode, order: listProfile(list).groups.map(group => group.name), profileId: listProfile(list).id, syncMinutes: Number(read(intervalKey(list.id))) || null, autoCleanup: !!list.auto_cleanup, capitalizeItems: capitalizeItems(list.id),
     unenrollPending: !!read(unenrollKey(list.id)), lastRun: read("last:" + list.id), error: read("error:" + list.id),
   }));
   res.json(lists);
@@ -504,7 +510,7 @@ app.get("/api/lists", (_req, res) => {
 app.get("/api/list-directory", (_req, res) => {
   const enrolled = new Set((db.prepare("SELECT id FROM lists").all() as { id: string }[]).map(list => list.id));
   const lists = localDirectory().filter(list => !enrolled.has(list.id)).map(list => ({
-    ...list, enrolled: false, mode: "off", order: [], autoCleanup: false,
+    ...list, enrolled: false, mode: "off", order: [], autoCleanup: false, capitalizeItems: false,
   }));
   res.json({ lists, directoryReady: read(directoryKey) !== undefined, directoryError, syncing: !!directorySync, connected: !!read("username") });
 });
@@ -605,7 +611,7 @@ app.post("/api/lists/:id/unenroll", async (req, res) => {
       for (const table of ["titles", "pending_titles", "aisle_corrections", "group_corrections", "activity"]) {
         db.prepare("DELETE FROM " + table + " WHERE list_id = ?").run(list.id);
       }
-      for (const key of [unenrollKey(list.id), profileKey(list.id), intervalKey(list.id), "snapshot:" + list.id, "last:" + list.id, "error:" + list.id]) {
+      for (const key of [unenrollKey(list.id), profileKey(list.id), intervalKey(list.id), capitalizeItemsKey(list.id), "snapshot:" + list.id, "last:" + list.id, "error:" + list.id]) {
         db.prepare("DELETE FROM state WHERE key = ?").run(key);
       }
     })();
@@ -621,16 +627,21 @@ app.post("/api/lists/:id/unenroll", async (req, res) => {
 app.put("/api/lists/:id", async (req, res) => {
   const list = enrolledList(req.params.id);
   if (!list) { res.sendStatus(404); return; }
-  const { mode, profileId, autoCleanup, syncMinutes } = req.body ?? {};
+  const { mode, profileId, autoCleanup, syncMinutes, capitalizeItems: capitalize } = req.body ?? {};
   if (!["named", "number", "off"].includes(mode) || !profiles().some(profile => profile.id === profileId)
     || typeof autoCleanup !== "boolean" || (syncMinutes !== null && !pollingOptions.includes(syncMinutes))) {
     res.status(400).json({ error: "Choose a valid grouping profile, prefix style and sync interval." });
+    return;
+  }
+  if (capitalize !== undefined && typeof capitalize !== "boolean") {
+    res.status(400).json({ error: "Choose whether to capitalize item names." });
     return;
   }
   if (active.has(list.id) || read(unenrollKey(list.id))) { res.status(409).json({ error: "Wait for the current run or finish unenrolling this list." }); return; }
   db.transaction(() => {
     db.prepare("UPDATE lists SET mode = ?, auto_cleanup = ? WHERE id = ?").run(mode, Number(autoCleanup), list.id);
     write(profileKey(list.id), profileId);
+    if (capitalize !== undefined) write(capitalizeItemsKey(list.id), capitalize ? "1" : "0");
     write(intervalKey(list.id), syncMinutes === null ? "" : String(syncMinutes));
   })();
   // Saving settings applies grouping without triggering duplicate deletion.
@@ -654,7 +665,7 @@ app.get("/api/lists/:id", (req, res) => {
     id: list.id, displayName: list.name, isShared: localDirectory().find(value => value.id === list.id)?.isShared,
     enrolled, mode: list.mode, order: enrolled ? listProfile(list).groups.map(group => group.name) : [],
     profileId: enrolled ? listProfile(list).id : "groceries", syncMinutes: Number(read(intervalKey(list.id))) || null,
-    autoCleanup: !!list.auto_cleanup, unenrollPending: !!read(unenrollKey(list.id)),
+    autoCleanup: !!list.auto_cleanup, capitalizeItems: capitalizeItems(list.id), unenrollPending: !!read(unenrollKey(list.id)),
     lastRun: enrolled ? read("last:" + list.id) : readSnapshot(list.id)?.syncedAt, error: read("error:" + list.id),
   });
 });

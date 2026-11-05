@@ -29,7 +29,7 @@ type Connection = { account: string | null; redirectUri: string; clientId: strin
 type List = {
   id: string; displayName: string; isShared: boolean; isOwner: boolean;
   enrolled: boolean; mode: string; order: string[]; lastRun?: string; error?: string;
-  unenrollPending?: boolean; autoCleanup: boolean; profileId: string; syncMinutes: number | null;
+  unenrollPending?: boolean; autoCleanup: boolean; capitalizeItems: boolean; profileId: string; syncMinutes: number | null;
 };
 type Activity = { created: string; message: string };
 
@@ -348,6 +348,7 @@ function ListSettings({ list, refresh, close }: { list: List; refresh: () => Pro
   const [restorePrefixes, setRestorePrefixes] = useState(list.mode !== "off" || !!list.unenrollPending);
   const [mode, setMode] = useState(list.mode);
   const [profileId, setProfileId] = useState(list.profileId);
+  const [capitalizeItems, setCapitalizeItems] = useState(list.capitalizeItems ?? false);
   const [autoCleanup, setAutoCleanup] = useState(list.autoCleanup);
   const [syncMinutes, setSyncMinutes] = useState(String(list.syncMinutes ?? ""));
   const [profiles, setProfiles] = useState<GroupingProfile[]>();
@@ -378,7 +379,7 @@ function ListSettings({ list, refresh, close }: { list: List; refresh: () => Pro
     setError("");
     setBusy(true);
     try {
-      await api("/lists/" + encodeURIComponent(list.id), "PUT", { mode, profileId, autoCleanup, syncMinutes: syncMinutes ? Number(syncMinutes) : null });
+      await api("/lists/" + encodeURIComponent(list.id), "PUT", { mode, profileId, autoCleanup, capitalizeItems, syncMinutes: syncMinutes ? Number(syncMinutes) : null });
       await refresh();
       close();
     } catch (error) {
@@ -387,7 +388,7 @@ function ListSettings({ list, refresh, close }: { list: List; refresh: () => Pro
       setBusy(false);
     }
   }
-  return <SettingsDialog title={list.displayName + " settings"} tabs={["Grouping", "Duplicates", "Sync", "Enrollment"]} selected={tab} select={setTab} close={() => { if (!busy) close(); }}>
+  return <SettingsDialog title={list.displayName + " settings"} tabs={["Grouping", "Formatting", "Duplicates", "Sync", "Enrollment"]} selected={tab} select={setTab} close={() => { if (!busy) close(); }}>
     <div className="grid gap-4">
       {error && <ErrorBanner message={error} />}
       {list.unenrollPending && <p className="text-sm text-warning">Automatic runs are paused while unenrollment is unfinished. Use the Enrollment tab to retry.</p>}
@@ -421,6 +422,7 @@ function ListSettings({ list, refresh, close }: { list: List; refresh: () => Pro
           </label>
         </>}
       </>}
+      {tab === "Formatting" && <SettingToggle label="Capitalize Each Word" hint="Turn frozen garden peas into Frozen Garden Peas. Applies to open items when the list syncs." checked={capitalizeItems} onChange={setCapitalizeItems} />}
       {tab === "Duplicates" && <SettingToggle label="Automatic Duplicate Cleanup" hint="Keep one open copy when possible and skip copies flagged for review." checked={autoCleanup} onChange={setAutoCleanup} />}
       {tab === "Sync" && <label className="grid gap-2 text-sm">Sync Interval
         <SelectInput value={syncMinutes} onChange={setSyncMinutes} disabled={!polling}>

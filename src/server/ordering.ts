@@ -7,6 +7,11 @@ export function itemKey(name: string) {
   return name.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+export function capitalizeWords(name: string) {
+  return name.replace(/[\p{L}\p{M}\p{N}]+(?:['’][\p{L}\p{M}\p{N}]+)*/gu, word =>
+    word.replace(/^\p{L}/u, first => first.toUpperCase()));
+}
+
 export function planTitles<T extends { id: string; title: string }>(tasks: T[], mode: Mode, order: string[], originals: Record<string, { base: string; applied: string }>, corrections: ReadonlyMap<string, string> = new Map(), match = groceryAisle) {
   const items = tasks.map(task => {
     const previous = originals[task.id];
