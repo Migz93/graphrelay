@@ -3,6 +3,7 @@ import type Database from "better-sqlite3";
 import { Router } from "express";
 import ical from "ical-generator";
 import { findIana } from "windows-iana";
+import { createCalendarView, type ViewEvent } from "./calendar-view.js";
 
 type Calendar = { id: string; name: string; groupId?: string | null };
 type DateTime = { dateTime: string; timeZone: string };
@@ -57,17 +58,23 @@ function allDayDate(date: Date, originalZone?: string) {
   }
 }
 
+function eventTimes(event: CalendarEvent) {
+  const start = eventDate(event.start);
+  const end = eventDate(event.end);
+  return {
+    start: event.isAllDay ? allDayDate(start, event.originalStartTimeZone) : start,
+    end: event.isAllDay ? allDayDate(end, event.originalEndTimeZone ?? event.originalStartTimeZone) : end,
+  };
+}
+
 export function renderCalendarFeed(name: string, events: CalendarEvent[]) {
   const calendar = ical({ name, prodId: "//GraphRelay//Calendar Feeds//EN" });
   const seen = new Set<string>();
   for (const event of events) {
     if (event.isCancelled || seen.has(event.id)) continue;
-    const start = eventDate(event.start);
-    const end = eventDate(event.end);
     calendar.createEvent({
       id: createHash("sha256").update(event.id).digest("hex") + "@graphrelay",
-      start: event.isAllDay ? allDayDate(start, event.originalStartTimeZone) : start,
-      end: event.isAllDay ? allDayDate(end, event.originalEndTimeZone ?? event.originalStartTimeZone) : end,
+      ...eventTimes(event),
       allDay: event.isAllDay,
       summary: event.subject || "Untitled Event",
       description: event.bodyPreview,
@@ -140,6 +147,33 @@ export function createCalendarFeeds(db: Database.Database, options: {
   const sources = (feed: Feed) => JSON.parse(feed.sources) as Calendar[];
   const settings = () => ({ ...defaults(), intervals, maxDays });
 
+  function calendarEvents(calendar: Calendar, start: Date, end: Date) {
+    const query = new URLSearchParams({
+      startDateTime: start.toISOString(),
+      endDateTime: end.toISOString(),
+      "$select": "id,subject,start,end,isAllDay,isCancelled,bodyPreview,location,originalStartTimeZone,originalEndTimeZone",
+    });
+    return options.collection<CalendarEvent>(calendarPath(calendar.id, calendar.groupId) + "/calendarView?" + query);
+  }
+
+  admin.use("/view", createCalendarView(db, {
+    account: options.account,
+    calendars: localCalendars,
+    intervalMinutes: () => defaults().intervalMinutes,
+    async events(calendar, start, end) {
+      const result: ViewEvent[] = [];
+      for (const event of await calendarEvents(calendar, start, end)) {
+        if (event.isCancelled) continue;
+        const times = eventTimes(event);
+        if (!Number.isFinite(+times.start) || !Number.isFinite(+times.end)) continue;
+        const format = (date: Date) => event.isAllDay ? date.toISOString().slice(0, 10) : date.toISOString();
+        result.push({ id: event.id, title: event.subject || "Untitled Event", start: format(times.start),
+          end: format(times.end), allDay: !!event.isAllDay, location: event.location?.displayName });
+      }
+      return result;
+    },
+  }));
+
   async function discover(account: string) {
     try {
       const calendars = await options.collection<Calendar>("me/calendars?$select=id,name");
@@ -176,16 +210,13 @@ export function createCalendarFeeds(db: Database.Database, options: {
     try {
       if (options.account() !== feed.account) return;
       const today = Math.floor(Date.now() / day) * day;
-      const query = new URLSearchParams({
-        startDateTime: new Date(today - (feed.past_days ?? current.pastDays) * day).toISOString(),
-        endDateTime: new Date(today + ((feed.future_days ?? current.futureDays) + 1) * day).toISOString(),
-        "$select": "id,subject,start,end,isAllDay,isCancelled,bodyPreview,location,originalStartTimeZone,originalEndTimeZone",
-      });
+      const start = new Date(today - (feed.past_days ?? current.pastDays) * day);
+      const end = new Date(today + ((feed.future_days ?? current.futureDays) + 1) * day);
       const events: CalendarEvent[] = [];
       for (const source of sources(feed)) {
         if (options.account() !== feed.account) return;
         const calendar = known.get(source.id) ?? source;
-        events.push(...await options.collection<CalendarEvent>(calendarPath(calendar.id, calendar.groupId) + "/calendarView?" + query));
+        events.push(...await calendarEvents(calendar, start, end));
       }
       if (options.account() !== feed.account) return;
       db.prepare("UPDATE calendar_feeds SET ics = ?, synced_at = ?, error = NULL WHERE token = ? AND revision = ?")
