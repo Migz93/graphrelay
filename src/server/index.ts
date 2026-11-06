@@ -18,7 +18,7 @@ import { aisles, capitalizeWords, itemKey, modes, planTitles, type Mode } from "
 declare module "express-session" {
   interface SessionData {
     admin?: boolean;
-    oauth?: { state: string; verifier: string; issued: number; calendars: boolean; redirectUri: string; returnToCalendar?: boolean };
+    oauth?: { state: string; verifier: string; issued: number; calendars: boolean; redirectUri: string };
   }
 }
 
@@ -119,6 +119,7 @@ let msal = setup?.clientId && setup.clientSecret
 const scopes = ["openid", "profile", "offline_access", "Tasks.ReadWrite"];
 
 const calendarScope = "Calendars.Read";
+const signInScopes = [...scopes, calendarScope];
 function calendarAccount() {
   const account = read("account");
   return msal && read("username") && account && read("calendar-consent") === account ? account : undefined;
@@ -521,7 +522,7 @@ app.get("/api/dashboard", (_req, res) => {
   });
 });
 app.use("/api/calendar-feeds", calendarFeeds.admin);
-app.get("/api/microsoft", (_req, res) => { res.json({ account: read("username") ?? null, hasClientSecret: !!(setup?.clientSecret || (legacySetup && env.MICROSOFT_CLIENT_SECRET)), redirectUri: microsoftRedirectUri(), trustProxy: network.trustProxy, clientId: setup?.clientId ?? (legacySetup ? env.MICROSOFT_CLIENT_ID : null), editable: !!setup }); });
+app.get("/api/microsoft", (_req, res) => { res.json({ account: read("username") ?? null, calendarAccess: !!calendarAccount(), hasClientSecret: !!(setup?.clientSecret || (legacySetup && env.MICROSOFT_CLIENT_SECRET)), redirectUri: microsoftRedirectUri(), trustProxy: network.trustProxy, clientId: setup?.clientId ?? (legacySetup ? env.MICROSOFT_CLIENT_ID : null), editable: !!setup }); });
 app.put("/api/microsoft", (req, res) => {
   if (req.get("Origin") !== network.publicUrl) { res.sendStatus(403); return; }
   if (!setup) { res.sendStatus(409); return; }
@@ -572,10 +573,8 @@ app.post("/api/microsoft/connect", async (req, res) => {
   const redirectUri = microsoftRedirectUri();
   const state = randomBytes(32).toString("hex");
   const pkce = await new CryptoProvider().generatePkceCodes();
-  const returnToCalendar = req.body?.calendarAccess === true;
-  const calendars = returnToCalendar || !!calendarAccount();
-  req.session.oauth = { state, verifier: pkce.verifier, issued: Date.now(), calendars, redirectUri, returnToCalendar };
-  const url = await msal!.getAuthCodeUrl({ scopes: calendars ? [...scopes, calendarScope] : scopes, redirectUri, state, codeChallenge: pkce.challenge, codeChallengeMethod: "S256", prompt: "select_account" });
+  req.session.oauth = { state, verifier: pkce.verifier, issued: Date.now(), calendars: true, redirectUri };
+  const url = await msal!.getAuthCodeUrl({ scopes: signInScopes, redirectUri, state, codeChallenge: pkce.challenge, codeChallengeMethod: "S256", prompt: "select_account" });
   res.json({ url });
 });
 app.get("/api/microsoft/callback", async (req, res) => {
@@ -593,7 +592,7 @@ app.get("/api/microsoft/callback", async (req, res) => {
     return;
   }
   try {
-    const result = await msal!.acquireTokenByCode({ code: req.query.code, scopes: pending.calendars ? [...scopes, calendarScope] : scopes, redirectUri: pending.redirectUri, codeVerifier: pending.verifier });
+    const result = await msal!.acquireTokenByCode({ code: req.query.code, scopes: pending.calendars ? signInScopes : scopes, redirectUri: pending.redirectUri, codeVerifier: pending.verifier });
     if (!result.account) throw new Error("Missing Microsoft account.");
     const current = read("account");
     if (current && current !== result.account.homeAccountId && (db.prepare("SELECT 1 FROM lists LIMIT 1").get() || db.prepare("SELECT 1 FROM calendar_feeds WHERE account = ? LIMIT 1").get(current))) {
@@ -608,7 +607,7 @@ app.get("/api/microsoft/callback", async (req, res) => {
     void calendarFeeds.refresh();
     lastDirectoryPoll = 0;
     schedulePoll(0);
-    res.redirect(pending.returnToCalendar && calendarAccount() ? "/calendar" : "/settings?tab=microsoft&connection=connected");
+    res.redirect("/settings?tab=microsoft&connection=connected");
   } catch (error) {
     const detail = error instanceof Error ? error.message.match(/AADSTS[0-9]{4,10}/)?.[0] : undefined;
     const reason = detail ?? "token-exchange";

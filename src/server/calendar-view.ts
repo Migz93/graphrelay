@@ -53,7 +53,7 @@ export function createCalendarView(db: Database.Database, options: {
 
   router.get("/", (req, res) => {
     const account = options.account();
-    if (!account) { res.status(409).json({ error: "Enable Calendar Access in Microsoft settings first." }); return; }
+    if (!account) { res.status(409).json({ error: "Connect Microsoft in Settings to grant Calendar access." }); return; }
     const month = req.query.month;
     if (typeof month !== "string" || !/^[1-9]\d{3}-(0[1-9]|1[0-2])$/.test(month)) {
       res.status(400).json({ error: "Choose a valid calendar month." });

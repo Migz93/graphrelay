@@ -1,6 +1,6 @@
 # Calendar
 
-Open **Calendar → Enable Calendar Access** and consent with the [connected Microsoft account](microsoft.md) before using events or subscription feeds.
+[Connect Microsoft](microsoft.md) and grant Calendar access before using events or subscription feeds. If you previously granted To Do access only, use **Settings → Microsoft → Reconnect Microsoft**.
 
 ## Events View
 

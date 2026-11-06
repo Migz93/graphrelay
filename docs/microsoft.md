@@ -1,6 +1,6 @@
 # Microsoft Setup
 
-GraphRelay uses a single Microsoft account for To Do and optional Outlook Calendar access. Use your local GraphRelay username and password to sign in to the web UI. Existing password-only installs use the username `admin` and their current password. On first run, **Set Up Microsoft** opens the checklist in **Settings → Microsoft**. Choose **Later** to return to it from Settings whenever you’re ready.
+GraphRelay uses a single Microsoft account for To Do and Outlook Calendar access. Use your local GraphRelay username and password to sign in to the web UI. Existing password-only installs use the username `admin` and their current password. On first run, **Set Up Microsoft** opens the checklist in **Settings → Microsoft**. Choose **Later** to return to it from Settings whenever you’re ready.
 
 ## Register The App
 
@@ -8,9 +8,8 @@ GraphRelay uses a single Microsoft account for To Do and optional Outlook Calend
 2. Under **Authentication**, add a redirect URI on the **Web** platform. Use the full **Microsoft Redirect URI** displayed in **Settings → Microsoft**.
 3. Under **Certificates & secrets**, create a client secret and copy its **Value** when it appears. Copy the **Application (client) ID** from the app overview.
 4. In **Settings → Microsoft**, open **Setup Instructions** and save those values. Select **Connect Microsoft** and sign in with the account you want GraphRelay to use. For a shared shopping list, use the owner’s account.
-5. To enable Calendar, open **Calendar → Enable Calendar Access** and consent using the same account.
 
-GraphRelay requests delegated `Tasks.ReadWrite` at sign-in and `Calendars.Read` when Calendar is enabled. Work or school accounts may require administrator approval. [Microsoft’s dynamic consent guide](https://learn.microsoft.com/en-us/entra/identity-platform/consent-types-developer#incremental-and-dynamic-user-consent)
+GraphRelay requests delegated `Tasks.ReadWrite` and `Calendars.Read` together at sign-in. Work or school accounts may require administrator approval. [Microsoft’s dynamic consent guide](https://learn.microsoft.com/en-us/entra/identity-platform/consent-types-developer#incremental-and-dynamic-user-consent)
 
 See [Microsoft’s registration guide](https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-register-app) and [Graph permissions reference](https://learn.microsoft.com/en-us/graph/permissions-reference).
 
@@ -30,7 +29,7 @@ GraphRelay checks To Do access after sign-in and checks Calendar access if grant
 | The browser redirects to localhost on a remote deployment | Open the matching tunnel in the browser or configure the instance’s HTTPS origin and register its callback. |
 | Callback is unauthorized or the sign-in session expired | Sign in to GraphRelay at the configured origin and start the flow again in the same tab. |
 | `AADSTS7000215` | Confirm the app ID and secret **Value**, check expiry, and save a new value if needed. |
-| Calendar still asks for access | Check delegated `Calendars.Read` and select **Enable Calendar Access** again. |
+| Calendar still asks for access | Select **Reconnect Microsoft** and approve the Calendar permission with the connected account. |
 | GraphRelay asks you to reconnect with the original account | An enrolled list or calendar feed still belongs to the previous account. Reconnect that account. |
 
 ## Implementation

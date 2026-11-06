@@ -26,7 +26,7 @@ Set Microsoft To Do to **Alphabetical** on each device if you enable grouping. G
 
 ## Calendar
 
-Open **Calendar** and select **Enable Calendar Access** if prompted. Open **Calendar → Events** to browse events or **Calendar → Feeds** to create and copy an iCalendar subscription link. Anyone with the link and network access to GraphRelay can read that feed. [Calendar guide](docs/calendar.md)
+GraphRelay requests Calendar access when you connect Microsoft. Open **Calendar → Events** to browse events or **Calendar → Feeds** to create and copy an iCalendar subscription link. Anyone with the link and network access to GraphRelay can read that feed. [Calendar guide](docs/calendar.md)
 
 ## Contributing
 

@@ -298,18 +298,6 @@ export default function CalendarFeeds({ microsoftConnected }: { microsoftConnect
     }
   }
 
-  async function enableCalendarAccess() {
-    setError("");
-    setBusy(true);
-    try {
-      const { url } = await api<{ url: string }>("/microsoft/connect", "POST", { calendarAccess: true });
-      window.location.assign(url);
-    } catch (error) {
-      setError((error as Error).message);
-      setBusy(false);
-    }
-  }
-
   return <Page className="space-y-5">
     <PageHeader title="Calendar">
       {status?.connected && <>
@@ -321,10 +309,10 @@ export default function CalendarFeeds({ microsoftConnected }: { microsoftConnect
     </PageHeader>
     {(error || status?.error) && <ErrorBanner message={error || status!.error!} />}
     {!status && !error && <PageLoading label="Loading Calendars…" />}
-    {status && !status.connected && <SectionCard title="Microsoft Calendar Access" description="Enable read access for your existing Microsoft connection to discover calendars.">
-      <div>{microsoftConnected
-        ? <button className={primaryButtonClass} disabled={busy} onClick={() => void enableCalendarAccess()}>Enable Calendar Access</button>
-        : <Link to="/settings?tab=microsoft" className={primaryButtonClass}>Connect Microsoft</Link>}</div>
+    {status && !status.connected && <SectionCard title="Microsoft Connection" description={microsoftConnected
+      ? "Reconnect Microsoft to grant Calendar access."
+      : "Connect Microsoft to use To Do and Calendar."}>
+      <div><Link to="/settings?tab=microsoft" className={primaryButtonClass}>Open Microsoft Settings</Link></div>
     </SectionCard>}
     {status?.connected && <>
       <nav aria-label="Calendar Sections" className="flex w-fit gap-1 rounded-xl bg-background-container-high p-1">

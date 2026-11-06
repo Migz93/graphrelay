@@ -313,14 +313,14 @@ export function createCalendarFeeds(db: Database.Database, options: {
     });
   });
   admin.post("/refresh", (_req, res) => {
-    if (!options.account()) { res.status(409).json({ error: "Enable Calendar Access in Microsoft settings first." }); return; }
+    if (!options.account()) { res.status(409).json({ error: "Connect Microsoft in Settings to grant Calendar access." }); return; }
     void refresh();
     res.status(202).json({ refreshing: true });
   });
 
   admin.post("/:id/refresh", (req, res) => {
     const account = options.account();
-    if (!account) { res.status(409).json({ error: "Enable Calendar Access in Microsoft settings first." }); return; }
+    if (!account) { res.status(409).json({ error: "Connect Microsoft in Settings to grant Calendar access." }); return; }
     const feed = feedById.get(req.params.id, account) as Feed | undefined;
     if (!feed) { res.sendStatus(404); return; }
     if (!refreshingFeeds.has(feed.token)) {
@@ -345,7 +345,7 @@ export function createCalendarFeeds(db: Database.Database, options: {
   const draftError = "Enter a feed name, select at least one calendar, and use valid refresh and day settings.";
   admin.post("/", (req, res) => {
     const account = options.account();
-    if (!account) { res.status(409).json({ error: "Enable Calendar Access in Microsoft settings first." }); return; }
+    if (!account) { res.status(409).json({ error: "Connect Microsoft in Settings to grant Calendar access." }); return; }
     // Accept the original one-calendar create request as well as a named feed.
     const legacy = req.body?.calendarId && localCalendars(account).find(calendar => calendar.id === req.body.calendarId);
     const input = draft(legacy ? { name: legacy.name, calendarIds: [legacy.id] } : req.body ?? {}, account);

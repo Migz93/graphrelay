@@ -6,7 +6,7 @@ import { api } from "./lib/api";
 import { useActionFeedback } from "./lib/useActionFeedback";
 import { cn } from "./lib/utils";
 
-type Connection = { account: string | null; hasClientSecret: boolean; redirectUri: string; trustProxy: boolean; clientId: string | null; editable: boolean };
+type Connection = { account: string | null; calendarAccess: boolean; hasClientSecret: boolean; redirectUri: string; trustProxy: boolean; clientId: string | null; editable: boolean };
 type AccessCheck = { todo: boolean; calendar: boolean | null };
 
 export default function MicrosoftSettings({ onAccountChange }: { onAccountChange: (account: string | null) => void }) {
@@ -127,7 +127,8 @@ export default function MicrosoftSettings({ onAccountChange }: { onAccountChange
         ? "The Microsoft sign-in session expired or did not match. Start again from Connect Microsoft in this tab."
         : "Microsoft sign-in failed." + (/^AADSTS[0-9]{4,10}$/.test(reason) ? " Microsoft error " + reason + "." : "") + " Try connecting again."
       : "";
-  const reconnectNeeded = credentialsNeedReconnect || outcome === "failed" || outcome === "wrong-account" || access?.todo === false || access?.calendar === false;
+  const missingCalendarAccess = !!connection?.account && !connection.calendarAccess;
+  const reconnectNeeded = missingCalendarAccess || credentialsNeedReconnect || outcome === "failed" || outcome === "wrong-account" || access?.todo === false || access?.calendar === false;
   const connectDisabled = !!action || !connection?.clientId || !onConfiguredOrigin;
 
   return <div className="space-y-5">
@@ -135,7 +136,7 @@ export default function MicrosoftSettings({ onAccountChange }: { onAccountChange
     {!connection && !error && <p className="text-sm text-on-surface-variant">Loading Microsoft settings…</p>}
     {connection && <>
       <SectionCard title="Microsoft Connection" description="Manage the account GraphRelay uses for To Do and Calendar.">
-        <SettingRow label="Account" hint={connection.account ?? "Follow the setup instructions below."} action>
+        <SettingRow label="Account" hint={connection.account ? <>{connection.account}{missingCalendarAccess && <span className="block">Reconnect to grant Calendar access.</span>}</> : "Follow the setup instructions below."} action>
           {connection.account && reconnectNeeded
             ? <button className={primaryButtonClass} disabled={connectDisabled || secretError} onClick={() => void connect()}>Reconnect Microsoft</button>
             : <span className="text-sm text-on-surface-variant">{connection.account ? "Connected" : "Not Connected"}</span>}
@@ -205,7 +206,7 @@ export default function MicrosoftSettings({ onAccountChange }: { onAccountChange
             </li>
             <li>
               <strong>Connect your account</strong>
-              <p className="mt-1 text-on-surface-variant">Microsoft asks for To Do access during sign-in. Work or school accounts may need approval from an administrator.</p>
+              <p className="mt-1 text-on-surface-variant">Microsoft asks for To Do and Calendar access during sign-in. Work or school accounts may need approval from an administrator.</p>
               {!connection.account && <button className={cn(primaryButtonClass, "mt-2")} disabled={connectDisabled} onClick={() => void connect()}>Connect Microsoft</button>}
             </li>
           </ol>
