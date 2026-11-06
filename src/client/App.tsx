@@ -15,9 +15,10 @@ import { api, sessionExpiredEvent, SessionExpiredError } from "./lib/api";
 import CalendarFeeds, { CalendarSettings } from "./CalendarFeeds";
 import Dashboard from "./Dashboard";
 import MicrosoftSettings from "./MicrosoftSettings";
+import ChangePassword from "./components/ChangePassword";
 import { SettingsDialog } from "./components/SettingsDialog";
 
-type Session = { configured: boolean } & ({ signedIn: false } | { signedIn: true; build: BuildInfo; username: string; microsoftAccount: string | null });
+type Session = { configured: boolean } & ({ signedIn: false } | { signedIn: true; build: BuildInfo; username: string; microsoftAccount: string | null; passwordEditable: boolean });
 type List = {
   id: string; displayName: string; isShared: boolean; isOwner: boolean;
   enrolled: boolean; mode: string; order: string[]; lastRun?: string; error?: string;
@@ -25,12 +26,17 @@ type List = {
 };
 type Activity = { created: string; message: string };
 
-function Login({ onLogin, firstRun = false }: { onLogin: () => void; firstRun?: boolean }) {
+type LoginNotice = "password-changed" | "session-ended";
+
+function Login({ onLogin, notice, firstRun = false }: { onLogin: () => void; notice?: LoginNotice; firstRun?: boolean }) {
   const navigate = useNavigate();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const noticeRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (notice) noticeRef.current?.focus(); }, [notice]);
+
   async function submit(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
@@ -56,6 +62,11 @@ function Login({ onLogin, firstRun = false }: { onLogin: () => void; firstRun?: 
           <p className="text-sm text-on-surface-variant">{firstRun ? "Create your local admin account" : "Sign in to continue"}</p>
         </div>
       </div>
+      {notice && <div ref={noticeRef} tabIndex={-1} role="status"
+        className={cn("mb-5 rounded-xl border px-4 py-3 text-sm focus-visible:outline-primary", notice === "password-changed"
+          ? "border-success/30 bg-success/10 text-success" : "border-warning/30 bg-warning/10 text-warning")}>
+        {notice === "password-changed" ? "Password changed. Sign in with your new password." : "Your session ended. Sign in again to continue."}
+      </div>}
       <label htmlFor="username" className="mb-2 block text-sm font-semibold text-on-surface">Username</label>
       <input id="username" autoComplete="username" autoCapitalize="none" spellCheck={false} maxLength={64}
         value={username} onChange={event => setUsername(event.target.value)} required
@@ -152,7 +163,9 @@ function NetworkSettings() {
   </SectionCard>;
 }
 
-function Settings({ build, onMicrosoftAccountChange }: { build: BuildInfo; onMicrosoftAccountChange: (account: string | null) => void }) {
+function Settings({ build, passwordEditable, onPasswordChanged, onMicrosoftAccountChange }: {
+  build: BuildInfo; passwordEditable: boolean; onPasswordChanged: () => void; onMicrosoftAccountChange: (account: string | null) => void;
+}) {
   const [params, setParams] = useSearchParams();
   const [busy, setBusy] = useState(false);
   const tabs = [{ id: "general", label: "General" }, { id: "microsoft", label: "Microsoft" }, { id: "todo", label: "To Do" }, { id: "calendar", label: "Calendar" }, { id: "about", label: "About" }];
@@ -177,7 +190,10 @@ function Settings({ build, onMicrosoftAccountChange }: { build: BuildInfo; onMic
       {tabs.map(value => <button key={value.id} type="button" disabled={busy} aria-pressed={tab === value.id} onClick={() => selectTab(value.id)}
         className={`flex-1 whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-all ${tab === value.id ? "bg-background-container text-on-surface shadow-sm" : "text-on-surface-variant hover:text-on-surface"}`}>{value.label}</button>)}
     </nav>
-    {tab === "general" && <NetworkSettings />}
+    {tab === "general" && <div className="space-y-5">
+      <NetworkSettings />
+      <ChangePassword editable={passwordEditable} onChanged={onPasswordChanged} />
+    </div>}
     {tab === "microsoft" && <MicrosoftSettings onAccountChange={onMicrosoftAccountChange} />}
     {(tab === "todo" || tab === "calendar") && <nav aria-label={tab === "todo" ? "To Do Settings Sections" : "Calendar Settings Sections"} className="mb-6 flex w-fit max-w-full gap-1 rounded-xl bg-background-container-high p-1">
       {sections.map(value => <button key={value.id} type="button" disabled={busy} aria-pressed={section === value.id}
@@ -1010,14 +1026,22 @@ function ToDo() {
 export default function App() {
   const [session, setSession] = useState<Session>();
   const [error, setError] = useState("");
-  const refresh = () => void api<Session>("/session").then(setSession).catch(error => setError(error.message));
+  const [loginNotice, setLoginNotice] = useState<LoginNotice>();
+  const refresh = () => void api<Session>("/session").then(value => {
+    if (value.signedIn) setLoginNotice(undefined);
+    setSession(value);
+  }).catch(error => setError(error.message));
   useEffect(() => {
-    const expire = () => setSession(current => current?.signedIn ? { configured: true, signedIn: false } : current);
+    const expire = () => {
+      setLoginNotice(current => current ?? "session-ended");
+      setSession(current => current?.signedIn ? { configured: true, signedIn: false } : current);
+    };
     window.addEventListener(sessionExpiredEvent, expire);
     refresh();
     return () => window.removeEventListener(sessionExpiredEvent, expire);
   }, []);
   function logout() {
+    setLoginNotice(undefined);
     void api("/logout", "POST").then(refresh).catch(error => {
       if (!(error instanceof SessionExpiredError)) setError(error.message);
     });
@@ -1025,7 +1049,7 @@ export default function App() {
   if (error) return <Page><ErrorBanner message={error} /></Page>;
   if (!session) return <PageLoading label="Loading GraphRelay…" />;
   if (!session.configured) return <Login firstRun onLogin={refresh} />;
-  if (!session.signedIn) return <Login onLogin={refresh} />;
+  if (!session.signedIn) return <Login onLogin={refresh} notice={loginNotice} />;
   return <Layout build={session.build} user={{ username: session.username, microsoftAccount: session.microsoftAccount }} onLogout={logout}>
     <Routes>
       <Route path="/dashboard" element={<Dashboard />} />
@@ -1040,7 +1064,10 @@ export default function App() {
       </Page>} />
       <Route path="/todo/*" element={<ToDo />} />
       <Route path="/calendar" element={<CalendarFeeds microsoftConnected={!!session.microsoftAccount} />} />
-      <Route path="/settings" element={<Settings build={session.build} onMicrosoftAccountChange={microsoftAccount => {
+      <Route path="/settings" element={<Settings build={session.build} passwordEditable={session.passwordEditable} onPasswordChanged={() => {
+        setLoginNotice("password-changed");
+        setSession({ configured: true, signedIn: false });
+      }} onMicrosoftAccountChange={microsoftAccount => {
         setSession(current => current?.signedIn ? { ...current, microsoftAccount } : current);
       }} />} />
       <Route path="*" element={<Navigate replace to="/dashboard" />} />

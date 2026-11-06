@@ -6,8 +6,8 @@ import { api } from "./lib/api";
 import { useActionFeedback } from "./lib/useActionFeedback";
 import { cn } from "./lib/utils";
 
-type Connection = { account: string | null; calendarAccess: boolean; hasClientSecret: boolean; redirectUri: string; trustProxy: boolean; clientId: string | null; editable: boolean };
-type AccessCheck = { todo: boolean; calendar: boolean | null };
+type Connection = { account: string | null; calendarAccess: boolean; needsReconnect: boolean; hasClientSecret: boolean; redirectUri: string; trustProxy: boolean; clientId: string | null; editable: boolean };
+type AccessCheck = { todo: boolean; calendar: boolean | null; needsReconnect: boolean };
 
 export default function MicrosoftSettings({ onAccountChange }: { onAccountChange: (account: string | null) => void }) {
   const [connection, setConnection] = useState<Connection>();
@@ -128,7 +128,7 @@ export default function MicrosoftSettings({ onAccountChange }: { onAccountChange
         : "Microsoft sign-in failed." + (/^AADSTS[0-9]{4,10}$/.test(reason) ? " Microsoft error " + reason + "." : "") + " Try connecting again."
       : "";
   const missingCalendarAccess = !!connection?.account && !connection.calendarAccess;
-  const reconnectNeeded = missingCalendarAccess || credentialsNeedReconnect || outcome === "failed" || outcome === "wrong-account" || access?.todo === false || access?.calendar === false;
+  const reconnectNeeded = missingCalendarAccess || (access?.needsReconnect ?? connection?.needsReconnect) || credentialsNeedReconnect || outcome === "failed" || outcome === "wrong-account" || access?.todo === false || access?.calendar === false;
   const connectDisabled = !!action || !connection?.clientId || !onConfiguredOrigin;
 
   return <div className="space-y-5">

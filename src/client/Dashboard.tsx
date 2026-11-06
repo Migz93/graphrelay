@@ -9,6 +9,7 @@ import { calendarColorsFor, hiddenCalendars, monthKey, type Calendar } from "./l
 
 type DashboardData = {
   connected: boolean;
+  microsoftReconnect: boolean;
   listCount: number;
   lists: { id: string; name: string; openItems: number | null; error: boolean }[];
   calendar: { connected: boolean; calendars: Calendar[]; error?: string; failedFeeds: { id: number; name: string }[] };
@@ -112,6 +113,13 @@ export default function Dashboard() {
       You can connect your account any time in <Link to="/settings?tab=microsoft" className="underline underline-offset-2">Settings → Microsoft</Link>.
     </p>}
     {error && <ErrorBanner message={error} />}
+    {data?.microsoftReconnect && <section role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-error/35 bg-error/12 px-4 py-3">
+      <div>
+        <h2 className="text-sm font-semibold text-error">Microsoft Connection Needs Attention</h2>
+        <p className="text-sm text-on-surface-variant">Reconnect to restore access to your Microsoft data.</p>
+      </div>
+      <Link to="/settings?tab=microsoft" className={compactSecondaryButtonClass}>Reconnect Microsoft</Link>
+    </section>}
     {!data && !error && <PageLoading label="Loading Dashboard…" />}
     {data && <nav aria-label="Dashboard Stats" className="grid grid-cols-3 gap-2 sm:gap-3">
       <DashboardStat label="Calendars" value={data.calendar.calendars.length} to="/calendar" icon={CalendarDays} />

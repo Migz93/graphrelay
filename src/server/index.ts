@@ -4,7 +4,7 @@ import express from "express";
 import session from "express-session";
 import { SqliteSessionStore } from "./session-store.js";
 import Database from "better-sqlite3";
-import { ConfidentialClientApplication, CryptoProvider } from "@azure/msal-node";
+import { ConfidentialClientApplication, CryptoProvider, InteractionRequiredAuthError } from "@azure/msal-node";
 import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -18,6 +18,7 @@ import { aisles, capitalizeWords, itemKey, modes, planTitles, type Mode } from "
 declare module "express-session" {
   interface SessionData {
     admin?: boolean;
+    sessionVersion?: string;
     oauth?: { state: string; verifier: string; issued: number; calendars: boolean; redirectUri: string };
   }
 }
@@ -107,12 +108,13 @@ function microsoftClient(clientId: string, clientSecret: string) {
     } },
   });
 }
-type Setup = { adminUsername?: string; clientId?: string; clientSecret?: string; salt: string; passwordHash: string };
+type Setup = { sessionVersion?: string; adminUsername?: string; clientId?: string; clientSecret?: string; salt: string; passwordHash: string };
 const savedSetup = read("setup");
 let setup = savedSetup ? JSON.parse(decrypt(savedSetup)) as Setup : undefined;
 const legacySetup = Boolean(env.APP_SECRET && env.ADMIN_PASSWORD && env.MICROSOFT_CLIENT_ID && env.MICROSOFT_CLIENT_SECRET);
 const adminUsername = () => setup?.adminUsername ?? "admin";
 const adminConfigured = () => !!setup || legacySetup;
+const isAdmin = (data: session.SessionData) => data.admin === true && data.sessionVersion === setup?.sessionVersion;
 let msal = setup?.clientId && setup.clientSecret
   ? microsoftClient(setup.clientId, setup.clientSecret)
   : legacySetup ? microsoftClient(env.MICROSOFT_CLIENT_ID!, env.MICROSOFT_CLIENT_SECRET!) : undefined;
@@ -126,6 +128,11 @@ function calendarAccount() {
 }
 
 const tokenRequests = new Map<string, Promise<string>>();
+const reconnectScopes = new Set<string>();
+let microsoftRevision = 0;
+function needsMicrosoftReconnect() {
+  return !!read("username") && reconnectScopes.size > 0;
+}
 function accessToken(scope: string) {
   const client = msal;
   const accountId = read("account");
@@ -134,7 +141,7 @@ function accessToken(scope: string) {
   if (existing) return existing;
   const pending = (async () => {
     const account = await client.getTokenCache().getAccountByHomeId(accountId);
-    if (!account) throw new Error("Connect Microsoft in Settings.");
+    if (!account) throw new InteractionRequiredAuthError("no_account_in_silent_request", "Connect Microsoft in Settings.");
     return (await client.acquireTokenSilent({ account, scopes: [scope] })).accessToken;
   })().finally(() => {
     if (tokenRequests.get(scope) === pending) tokenRequests.delete(scope);
@@ -147,10 +154,16 @@ async function graph<T = void>(path: string, body?: object, method = body ? "PAT
   const todo = url.pathname.startsWith("/v1.0/me/todo/");
   const calendar = isCalendarGraphRead(url, method);
   if (url.origin !== "https://graph.microsoft.com" || (!todo && !calendar)) throw new Error("Invalid Graph URL.");
+  const scope = calendar ? calendarScope : "Tasks.ReadWrite";
+  const revision = microsoftRevision;
   const request = async () => fetch(url, {
     method,
     headers: {
-      Authorization: "Bearer " + await accessToken(calendar ? calendarScope : "Tasks.ReadWrite"),
+      Authorization: "Bearer " + await accessToken(scope).catch(error => {
+        if (revision === microsoftRevision && (error instanceof InteractionRequiredAuthError
+          || ["invalid_grant", "invalid_client"].includes(error?.errorCode))) reconnectScopes.add(scope);
+        throw error;
+      }),
       "Content-Type": "application/json",
       ...(calendar ? { Prefer: 'outlook.timezone="UTC", IdType="ImmutableId"' } : {}),
     },
@@ -169,6 +182,10 @@ async function graph<T = void>(path: string, body?: object, method = body ? "PAT
     await delay(seconds * 1000);
     if (client !== msal || account !== read("account")) throw new Error("Microsoft connection changed.");
     response = await request();
+  }
+  if (revision === microsoftRevision) {
+    if (response.status === 401) reconnectScopes.add(scope);
+    if (response.ok) reconnectScopes.delete(scope);
   }
   if (!response.ok) throw new Error("Microsoft Graph returned " + response.status + ".");
   return response.status === 204 ? undefined as T : await response.json() as T;
@@ -428,7 +445,12 @@ const build = {
   channel: env.BUILD_CHANNEL ?? "custom",
   revision: env.COMMIT_SHA ?? "local",
 };
-app.get("/api/session", (req, res) => { res.json({ configured: adminConfigured(), signedIn: !!req.session.admin, ...(req.session.admin ? { build, username: adminUsername(), microsoftAccount: read("username") ?? null } : {}) }); });
+app.get("/api/session", (req, res) => {
+  const signedIn = isAdmin(req.session);
+  res.json({ configured: adminConfigured(), signedIn, ...(signedIn ? {
+    build, username: adminUsername(), microsoftAccount: read("username") ?? null, passwordEditable: !!setup,
+  } : {}) });
+});
 app.use("/api", (req, res, next) => {
   if (req.method !== "GET" && req.get("X-GraphRelay") !== "1") {
     res.sendStatus(403);
@@ -462,29 +484,69 @@ app.post("/api/setup", (req, res) => {
 });
 let failures = 0;
 let resetAt = 0;
+function passwordAttemptsLimited() {
+  if (Date.now() > resetAt) { failures = 0; resetAt = Date.now() + 60_000; }
+  return failures >= 10;
+}
+function validPassword(password: unknown) {
+  if (typeof password !== "string" || password.length > 1024) return false;
+  if (setup) return timingSafeEqual(scryptSync(password, setup.salt, 32), Buffer.from(setup.passwordHash, "hex"));
+  const digest = (value: string) => createHash("sha256").update(value).digest();
+  return timingSafeEqual(digest(password), digest(env.ADMIN_PASSWORD!));
+}
 app.post("/api/login", (req, res, next) => {
   if (!adminConfigured()) { res.sendStatus(503); return; }
-  if (Date.now() > resetAt) { failures = 0; resetAt = Date.now() + 60_000; }
-  if (failures >= 10) { res.sendStatus(429); return; }
+  if (passwordAttemptsLimited()) { res.sendStatus(429); return; }
   const { username, password } = req.body ?? {};
-  const digest = (value: string) => createHash("sha256").update(value).digest();
-  const valid = typeof password === "string" && password.length <= 1024 && (setup
-    ? timingSafeEqual(scryptSync(password, setup.salt, 32), Buffer.from(setup.passwordHash, "hex"))
-    : timingSafeEqual(digest(password), digest(env.ADMIN_PASSWORD!)));
-  if (!valid || typeof username !== "string" || username.trim().toLowerCase() !== adminUsername().toLowerCase()) {
+  if (!validPassword(password) || typeof username !== "string" || username.trim().toLowerCase() !== adminUsername().toLowerCase()) {
     failures++;
     res.sendStatus(401);
     return;
   }
+  const sessionVersion = setup?.sessionVersion;
   req.session.regenerate(error => {
     if (error) { next(error); return; }
+    if (sessionVersion !== setup?.sessionVersion) { res.sendStatus(401); return; }
     req.session.admin = true;
+    req.session.sessionVersion = sessionVersion;
     res.sendStatus(204);
   });
 });
 app.use("/api", (req, res, next) => {
-  if (!req.session.admin) { res.sendStatus(401); return; }
+  if (!isAdmin(req.session)) { res.sendStatus(401); return; }
   next();
+});
+app.post("/api/change-password", (req, res) => {
+  if (!setup) { res.status(409).json({ error: "This installation manages its admin password through the environment." }); return; }
+  if (passwordAttemptsLimited()) { res.status(429).json({ error: "Too many attempts. Try again in a minute." }); return; }
+  const { currentPassword, newPassword, confirmPassword } = req.body ?? {};
+  if (typeof newPassword !== "string" || !newPassword.trim() || newPassword.length > 256) {
+    res.status(400).json({ error: "Enter a new password of up to 256 characters." });
+    return;
+  }
+  if (newPassword !== confirmPassword) {
+    res.status(400).json({ error: "Passwords do not match." });
+    return;
+  }
+  if (!validPassword(currentPassword)) {
+    failures++;
+    res.status(400).json({ error: "Current password is incorrect." });
+    return;
+  }
+  const salt = randomBytes(16).toString("hex");
+  const replacement = {
+    ...setup, salt, passwordHash: scryptSync(newPassword, salt, 32).toString("hex"),
+    sessionVersion: randomBytes(16).toString("hex"),
+  };
+  db.transaction(() => {
+    write("setup", encrypt(JSON.stringify(replacement)));
+    db.prepare("DELETE FROM web_sessions").run();
+  })();
+  setup = replacement;
+  req.session.destroy(() => {
+    res.clearCookie("connect.sid");
+    res.sendStatus(204);
+  });
 });
 app.post("/api/logout", (req, res, next) => {
   req.session.destroy(error => {
@@ -512,6 +574,7 @@ app.get("/api/dashboard", (_req, res) => {
   const enrolled = db.prepare("SELECT id, name FROM lists ORDER BY name COLLATE NOCASE").all() as { id: string; name: string }[];
   res.json({
     connected: !!read("username"),
+    microsoftReconnect: needsMicrosoftReconnect(),
     listCount: new Set([...localDirectory(), ...enrolled].map(list => list.id)).size,
     lists: enrolled.map(list => ({
       ...list,
@@ -522,7 +585,7 @@ app.get("/api/dashboard", (_req, res) => {
   });
 });
 app.use("/api/calendar-feeds", calendarFeeds.admin);
-app.get("/api/microsoft", (_req, res) => { res.json({ account: read("username") ?? null, calendarAccess: !!calendarAccount(), hasClientSecret: !!(setup?.clientSecret || (legacySetup && env.MICROSOFT_CLIENT_SECRET)), redirectUri: microsoftRedirectUri(), trustProxy: network.trustProxy, clientId: setup?.clientId ?? (legacySetup ? env.MICROSOFT_CLIENT_ID : null), editable: !!setup }); });
+app.get("/api/microsoft", (_req, res) => { res.json({ account: read("username") ?? null, needsReconnect: needsMicrosoftReconnect(), calendarAccess: !!calendarAccount(), hasClientSecret: !!(setup?.clientSecret || (legacySetup && env.MICROSOFT_CLIENT_SECRET)), redirectUri: microsoftRedirectUri(), trustProxy: network.trustProxy, clientId: setup?.clientId ?? (legacySetup ? env.MICROSOFT_CLIENT_ID : null), editable: !!setup }); });
 app.put("/api/microsoft", (req, res) => {
   if (req.get("Origin") !== network.publicUrl) { res.sendStatus(403); return; }
   if (!setup) { res.sendStatus(409); return; }
@@ -542,6 +605,8 @@ app.put("/api/microsoft", (req, res) => {
   })();
   setup = configuration;
   msal = client;
+  microsoftRevision++;
+  if (!read("username")) reconnectScopes.clear();
   tokenRequests.clear();
   delete req.session.oauth;
   res.sendStatus(204);
@@ -561,7 +626,7 @@ app.post("/api/microsoft/test", async (_req, res) => {
     res.status(409).json({ error: "The Microsoft connection changed. Try testing again." });
     return;
   }
-  res.json({ todo, calendar });
+  res.json({ todo, calendar, needsReconnect: needsMicrosoftReconnect() });
 });
 app.post("/api/microsoft/connect", async (req, res) => {
   if (!msal) { res.status(409).json({ error: "Save your Microsoft app credentials first." }); return; }
@@ -603,6 +668,8 @@ app.get("/api/microsoft/callback", async (req, res) => {
     write("username", result.account.username || "Microsoft account");
     write("calendar-consent", pending.calendars && result.scopes.some(scope => scope.split("/").at(-1)?.toLowerCase() === calendarScope.toLowerCase())
       ? result.account.homeAccountId : "");
+    microsoftRevision++;
+    reconnectScopes.clear();
     tokenRequests.clear();
     void calendarFeeds.refresh();
     lastDirectoryPoll = 0;

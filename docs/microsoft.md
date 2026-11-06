@@ -19,7 +19,7 @@ GraphRelay appends `/api/microsoft/callback` to the configured **Public URL**. T
 
 **Use This Address** is available for HTTPS and HTTP localhost when the browser address differs. Begin the Microsoft flow from the configured origin in a tab already signed in to GraphRelay. The browser needs to reach the callback and carry the same session cookie. See [Deployment](deployment.md) for proxy configuration and [Microsoft’s redirect URI rules](https://learn.microsoft.com/en-us/entra/identity-platform/reply-url).
 
-GraphRelay checks To Do access after sign-in and checks Calendar access if granted. Use **Test Connection** to repeat the check later. **Reconnect Microsoft** appears after an access check or sign-in reports a problem. A masked placeholder shows that a client secret is already saved.
+GraphRelay checks To Do access after sign-in and checks Calendar access if granted. Use **Test Connection** to repeat the check later. **Reconnect Microsoft** appears when Calendar consent is missing or when sign-in or an access check reports a problem. Background token failures that require sign-in also show a red reconnect alert on the dashboard. Temporary service failures continue on the normal retry schedule. A masked placeholder shows that a client secret is already saved.
 
 ## Troubleshooting
 
