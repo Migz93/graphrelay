@@ -9,10 +9,23 @@ test("named prefixes group open items without stacking GraphRelay prefixes", () 
   deepEqual(planTitles(tasks, "off", aisles, originals).map(task => task.next), ["Peas", "Pizza"]);
 });
 
-test("number-only titles follow aisle order and respect a user edit", () => {
-  const tasks = [{ id: "1", title: "Cheese" }, { id: "2", title: "Apples" }, { id: "3", title: "Peas" }];
-  const originals = { "1": { base: "Milk", applied: "04 Dairy · Milk" } };
-  deepEqual(planTitles(tasks, "number", aisles, originals).map(task => task.next), ["001 · Apples", "002 · Peas", "003 · Cheese"]);
+test("both number-only styles share a prefix per aisle and replace tracked sequential prefixes", () => {
+  const tasks = [
+    { id: "1", title: "003 · Cheese" },
+    { id: "2", title: "Apples" },
+    { id: "3", title: "002 · Garden Peas" },
+    { id: "4", title: "Pizza" },
+  ];
+  const originals = {
+    "1": { base: "Cheese", applied: "003 · Cheese" },
+    "3": { base: "Peas", applied: "002 · Peas" },
+  };
+  deepEqual(planTitles(tasks, "number", aisles, originals).map(task => task.next), [
+    "001 · Apples", "003 · Garden Peas", "003 · Pizza", "004 · Cheese",
+  ]);
+  deepEqual(planTitles(tasks, "number-2", aisles, originals).map(task => task.next), [
+    "01 · Apples", "03 · Garden Peas", "03 · Pizza", "04 · Cheese",
+  ]);
 });
 
 test("editing an item in To Do preserves the edit without stacking prefixes", () => {
@@ -29,13 +42,11 @@ test("grocery aliases and pack sizes work without changing the item title", () =
   deepEqual(names.map(name => actual.get(name)), ["Frozen", "Frozen", "Produce", "Dairy", "Pantry", "Pantry", "Pantry", "Pantry", "Other", "Other"]);
 });
 
-test("two-digit numbering replaces tracked prefixes and widens at 100 open items", () => {
-  const tasks = [{ id: "peas", title: "001 · Peas" }];
-  const originals = { peas: { base: "Peas", applied: "001 · Peas" } };
-  deepEqual(planTitles(tasks, "number-2", aisles, originals).map(task => task.next), ["01 · Peas"]);
+test("numbering stays two digits for large lists and follows custom group order", () => {
   const many = Array.from({ length: 100 }, (_, i) => ({ id: String(i), title: "Task " + String(i).padStart(3, "0") }));
-  deepEqual(planTitles(many.slice(0, 99), "number-2", aisles, {}).map(task => task.next).slice(-1), ["99 · Task 098"]);
-  const numbered = planTitles(many, "number-2", aisles, {}).map(task => task.next);
-  deepEqual([numbered[0], numbered[99]], ["001 · Task 000", "100 · Task 099"]);
-  deepEqual(numbered, [...numbered].sort());
+  const numbered = planTitles(many, "number-2", ["Other", "Frozen"], {}).map(item => item.next);
+  deepEqual([numbered[0], numbered[99]], ["01 · Task 000", "01 · Task 099"]);
+  const tasks = [{ id: "peas", title: "Peas" }, ...many];
+  const reordered = planTitles(tasks, "number-2", ["Other", "Frozen"], {}).map(item => item.next);
+  deepEqual(reordered.slice(-2), ["01 · Task 099", "02 · Peas"]);
 });

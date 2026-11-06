@@ -27,7 +27,7 @@ The tests use Node’s test runner through `tsx`. They run without a live Micros
 
 | Test file | Coverage |
 |---|---|
-| [ordering.test.ts](tests/ordering.test.ts) | Named and numeric prefixes, two-digit width at 99 and 100 items, title recovery, grocery matching |
+| [ordering.test.ts](tests/ordering.test.ts) | Named and numeric prefixes, shared numeric prefixes, custom order and large lists, title recovery, grocery matching |
 | [profile-matcher.test.ts](tests/profile-matcher.test.ts) | Default aliases, explicit moves, quantities and optional plural rules |
 | [grouping-draft.test.ts](tests/grouping-draft.test.ts) | Editor state, built-in matches, fallback group and moving plural matches |
 | [grouping-store.test.ts](tests/grouping-store.test.ts) | JSON round trips, filenames, stable IDs and profile portability |

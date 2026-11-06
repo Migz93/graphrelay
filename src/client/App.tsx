@@ -539,8 +539,8 @@ function ListSettings({ list, refresh, close }: { list: List; refresh: () => Pro
               <label className="grid gap-2 text-sm">Prefix Style
                 <SelectInput value={mode} onChange={setMode}>
                   <option value="named">Named · 03 Frozen · Peas</option>
-                  <option value="number-2">Number Only · 14 · Peas</option>
-                  <option value="number">Number Only · 014 · Peas</option>
+                  <option value="number-2">Number Only · 03 · Peas</option>
+                  <option value="number">Number Only · 003 · Peas</option>
                 </SelectInput>
               </label>
             </>}

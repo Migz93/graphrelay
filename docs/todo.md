@@ -9,7 +9,7 @@ Select **Enroll List** from the list and confirm. Enrollment starts with groupin
 ## Grouping And Formatting
 
 1. In **List Settings → Grouping**, choose a shared profile and select named or numeric prefixes.
-2. Set the list to **Alphabetical** in Microsoft To Do on each device. Named prefixes look like `03 Frozen · Peas`. Number-only prefixes can start at two digits (`14 · Peas`) or three digits (`014 · Peas`). The prefix widens when needed so alphabetical order still works.
+2. Set the list to **Alphabetical** in Microsoft To Do on each device. Named prefixes look like `03 Frozen · Peas`. Number-only prefixes use two digits (`03 · Peas`) or three digits (`003 · Peas`). All items in the same group share its number, based on the group’s position in the profile. Existing numeric prefixes update on the next sync.
 3. In GraphRelay, select an open item to change its group. The saved match lives in the shared profile under **Settings → To Do → Groupings**. Every list using it picks up the rule on its next sync. **Sync Now** runs the current list immediately.
 
 The **Groceries** profile is included. You can create other profiles, reorder groups, change matches and enable singular/plural matching per group. Export profiles by copying their JSON files. [Grouping profile files](grouping-profiles.md)

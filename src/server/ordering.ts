@@ -23,11 +23,12 @@ export function planTitles<T extends { id: string; title: string }>(tasks: T[], 
     return { ...task, base, aisle, rank: order.indexOf(aisle) };
   });
   items.sort((a, b) => a.rank - b.rank || a.base.localeCompare(b.base) || a.id.localeCompare(b.id));
-  const width = Math.max(mode === "number-2" ? 2 : 3, String(items.length).length);
-  return items.map((item, index) => {
+  const width = mode === "number" ? 3 : 2;
+  return items.map(item => {
+    const rank = String(item.rank + 1).padStart(width, "0");
     let next = item.base;
-    if (mode === "named") next = String(item.rank + 1).padStart(2, "0") + " " + item.aisle + " · " + item.base;
-    if (mode === "number" || mode === "number-2") next = String(index + 1).padStart(width, "0") + " · " + item.base;
+    if (mode === "named") next = rank + " " + item.aisle + " · " + item.base;
+    if (mode === "number" || mode === "number-2") next = rank + " · " + item.base;
     return { ...item, next };
   });
 }
