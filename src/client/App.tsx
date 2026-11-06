@@ -419,9 +419,8 @@ type GroupingProfile = { id: string; name: string; grocery: boolean; usedBy: num
 
 function ListSettings({ list, refresh, close }: { list: List; refresh: () => Promise<void>; close: () => void }) {
   const navigate = useNavigate();
-  const [tab, setTab] = useState(list.unenrollPending ? "Enrollment" : "Grouping");
+  const [tab, setTab] = useState("General");
   const [confirmUnenroll, setConfirmUnenroll] = useState(false);
-  const [restorePrefixes, setRestorePrefixes] = useState(list.mode !== "off" || !!list.unenrollPending);
   const [mode, setMode] = useState(list.mode);
   const [profileId, setProfileId] = useState(list.profileId);
   const [capitalizeItems, setCapitalizeItems] = useState(list.capitalizeItems ?? false);
@@ -431,17 +430,20 @@ function ListSettings({ list, refresh, close }: { list: List; refresh: () => Pro
   const [polling, setPolling] = useState<{ minutes: number; options: number[] }>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const { feedback: saved, showFeedback, clearFeedback } = useActionFeedback();
+  const path = "/lists/" + encodeURIComponent(list.id);
+
   async function unenroll() {
     setBusy(true);
     setError("");
     try {
-      await api("/lists/" + encodeURIComponent(list.id) + "/unenroll", "POST", { restorePrefixes });
-      await refresh();
+      await api(path + "/unenroll", "POST");
       close();
       navigate("/todo", { replace: true });
+      void refresh().catch(() => undefined);
     } catch (error) {
       setError((error as Error).message);
-      await refresh();
+      void refresh().catch(() => undefined);
     } finally {
       setBusy(false);
     }
@@ -451,62 +453,71 @@ function ListSettings({ list, refresh, close }: { list: List; refresh: () => Pro
       .then(([values, interval]) => { setProfiles(values); setPolling(interval); })
       .catch(error => setError(error.message));
   }, []);
-  async function save() {
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    if (blocked || !profiles || !polling) return;
     setError("");
+    clearFeedback();
     setBusy(true);
     try {
-      await api("/lists/" + encodeURIComponent(list.id), "PUT", { mode, profileId, autoCleanup, capitalizeItems, syncMinutes: syncMinutes ? Number(syncMinutes) : null });
-      await refresh();
-      close();
+      await api(path, "PUT", { mode, profileId, autoCleanup, capitalizeItems, syncMinutes: syncMinutes ? Number(syncMinutes) : null });
+      showFeedback(true);
+      void refresh().catch(() => undefined);
     } catch (error) {
       setError((error as Error).message);
     } finally {
       setBusy(false);
     }
   }
-  return <SettingsDialog title={list.displayName + " settings"} tabs={["Grouping", "Formatting", "Duplicates", "Sync", "Enrollment"]} selected={tab} select={setTab} close={() => { if (!busy) close(); }}>
+
+  const blocked = busy || !!list.unenrollPending || confirmUnenroll;
+  return <SettingsDialog title={list.displayName + " Settings"} tabs={["General", "Grouping"]} selected={tab} select={value => { if (!busy) setTab(value); }} close={() => { if (!busy) close(); }}>
     <div className="grid gap-4">
       {error && <ErrorBanner message={error} />}
-      {list.unenrollPending && <p className="text-sm text-warning">Automatic runs are paused while unenrollment is unfinished. Use the Enrollment tab to retry.</p>}
-      {tab === "Enrollment" && <div className="grid gap-4">
-        <p className="text-sm text-on-surface-variant">Unenroll this list to stop its automatic actions. Its contents will still be cached on the default schedule. This removes its local settings and remembered corrections.</p>
-        <label className="flex items-start gap-2 text-sm">
-          <input type="checkbox" className="mt-1 accent-primary" checked={restorePrefixes} disabled={busy} onChange={event => setRestorePrefixes(event.target.checked)} />
-          <span>Remove GraphRelay prefixes from open and completed items before unenrolling.</span>
-        </label>
+      {list.unenrollPending && <p className="text-sm text-warning">Automatic runs are paused while unenrollment is unfinished. Use General to retry.</p>}
+      <form className="grid gap-4" onSubmit={save} onChange={clearFeedback}>
+        <fieldset className="grid gap-4" disabled={blocked}>
+          {tab === "General" ? <>
+            <SettingToggle label="Capitalize Each Word" hint="Turn frozen garden peas into Frozen Garden Peas. Applies to open items when the list syncs." checked={capitalizeItems} onChange={setCapitalizeItems} />
+            <SettingToggle label="Automatic Duplicate Cleanup" hint="Keep one open copy when possible and skip copies flagged for review. Runs during regular list syncs." checked={autoCleanup} onChange={setAutoCleanup} />
+            <label className="grid gap-2 text-sm">Sync Interval
+              <SelectInput value={syncMinutes} onChange={setSyncMinutes} disabled={!polling}>
+                <option value="">Use default{polling ? " (" + polling.minutes + " min)" : ""}</option>
+                {polling?.options.map(minutes => <option key={minutes} value={minutes}>{minutes} min</option>)}
+              </SelectInput>
+            </label>
+          </> : <>
+            <SettingToggle label="Group Items" hint="Apply a grouping profile to this list. Use Alphabetical sort in Microsoft To Do." checked={mode !== "off"} onChange={enabled => setMode(enabled ? "named" : "off")} />
+            {mode !== "off" && <>
+              <label className="grid gap-2 text-sm">Grouping Profile
+                <SelectInput value={profileId} onChange={setProfileId} disabled={!profiles}>
+                  {profiles?.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
+                </SelectInput>
+              </label>
+              <label className="grid gap-2 text-sm">Prefix Style
+                <SelectInput value={mode} onChange={setMode}>
+                  <option value="named">Named · 03 Frozen · Peas</option>
+                  <option value="number-2">Number Only · 14 · Peas</option>
+                  <option value="number">Number Only · 014 · Peas</option>
+                </SelectInput>
+              </label>
+            </>}
+          </>}
+        </fieldset>
+        <div><button className={cn(primaryButtonClass, "min-w-40", saved && successButtonClass)} aria-live="polite" disabled={blocked || !profiles || !polling}>
+          {busy && !confirmUnenroll ? "Saving…" : saved ? "Saved" : "Save List Settings"}
+        </button></div>
+      </form>
+      {tab === "General" && <div className="grid gap-3 border-t border-outline-variant/30 pt-4">
+        <p className="text-sm text-on-surface-variant">Unenrolling stops automation and removes GraphRelay prefixes from open and completed items. The list will still be cached on the default schedule.</p>
         {confirmUnenroll ? <>
-          <p className="text-sm">Unenroll {list.displayName}{restorePrefixes ? " and restore names where the GraphRelay prefix is still present" : " with the current Microsoft To Do titles"}?</p>
+          <p className="text-sm">Unenroll {list.displayName} and remove its prefixes?</p>
           <div className="flex flex-wrap gap-2">
             <button className={dangerButtonClass} disabled={busy} onClick={() => void unenroll()}>{busy ? "Unenrolling…" : "Confirm Unenrollment"}</button>
             <button className={secondaryButtonClass} disabled={busy} onClick={() => setConfirmUnenroll(false)}>Cancel</button>
           </div>
-        </> : <div><button className={dangerButtonClass} disabled={busy} onClick={() => setConfirmUnenroll(true)}>Unenroll List</button></div>}
+        </> : <div><button className={dangerButtonClass} disabled={busy} onClick={() => { clearFeedback(); setConfirmUnenroll(true); }}>Unenroll List</button></div>}
       </div>}
-      {tab === "Grouping" && <>
-        <SettingToggle label="Group Items" hint="Apply a grouping profile to this list. Use Alphabetical sort in Microsoft To Do." checked={mode !== "off"} onChange={enabled => setMode(enabled ? "named" : "off")} />
-        {mode !== "off" && <>
-          <label className="grid gap-2 text-sm">Grouping Profile
-            <SelectInput value={profileId} onChange={setProfileId} disabled={!profiles}>
-              {profiles?.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
-            </SelectInput>
-          </label>
-          <label className="grid gap-2 text-sm">Prefix Style
-            <SelectInput value={mode} onChange={setMode}>
-              <option value="named">Named · 03 Frozen · Peas</option>
-              <option value="number">Number only · 014 · Peas</option>
-            </SelectInput>
-          </label>
-        </>}
-      </>}
-      {tab === "Formatting" && <SettingToggle label="Capitalize Each Word" hint="Turn frozen garden peas into Frozen Garden Peas. Applies to open items when the list syncs." checked={capitalizeItems} onChange={setCapitalizeItems} />}
-      {tab === "Duplicates" && <SettingToggle label="Automatic Duplicate Cleanup" hint="Keep one open copy when possible and skip copies flagged for review." checked={autoCleanup} onChange={setAutoCleanup} />}
-      {tab === "Sync" && <label className="grid gap-2 text-sm">Sync Interval
-        <SelectInput value={syncMinutes} onChange={setSyncMinutes} disabled={!polling}>
-          <option value="">Use default{polling ? " (" + polling.minutes + " min)" : ""}</option>
-          {polling?.options.map(minutes => <option key={minutes} value={minutes}>{minutes} min</option>)}
-        </SelectInput>
-      </label>}
-      {tab !== "Enrollment" && <div><button className={primaryButtonClass} disabled={busy || !!list.unenrollPending || !profiles || !polling} onClick={() => void save()}>{busy ? "Saving…" : "Save List Settings"}</button></div>}
     </div>
   </SettingsDialog>;
 }
@@ -934,7 +945,7 @@ function ListDetail({ list, refresh }: { list: List; refresh: () => Promise<void
       <DuplicatePreview key={previewRevision} path={path} onRemoved={() => { setItemRevision(value => value + 1); setHistory(undefined); void refresh(); }} />
     </SettingsDialog>}
     <ListItems key={itemRevision} path={path} grouped={list.enrolled && list.mode !== "off" && !list.unenrollPending} />
-    {settings && list.enrolled && <ListSettings list={list} refresh={async () => { await refresh(); setItemRevision(value => value + 1); setPreviewRevision(value => value + 1); }} close={() => setSettings(false)} />}
+    {settings && list.enrolled && <ListSettings list={list} refresh={refresh} close={() => setSettings(false)} />}
   </Page>;
 }
 
@@ -980,20 +991,21 @@ function ListPage({ lists, refresh }: { lists: List[]; refresh: () => Promise<vo
   const [error, setError] = useState("");
   async function reload() {
     if (!listId) return;
-    const value = await api<List>("/lists/" + encodeURIComponent(listId));
+    const [value] = await Promise.all([api<List>("/lists/" + encodeURIComponent(listId)), refresh()]);
     setView(value);
-    await refresh();
   }
   useEffect(() => {
+    if (!listId) return;
     let current = true;
-    setView(undefined);
     setError("");
-    if (listId) void api<List>("/lists/" + encodeURIComponent(listId)).then(value => {
-      if (current) setView(value);
+    const load = () => api<List>("/lists/" + encodeURIComponent(listId)).then(value => {
+      if (current) { setView(value); setError(""); }
     }).catch(error => { if (current) setError(error.message); });
-    return () => { current = false; };
+    void load();
+    const timer = window.setInterval(() => void load(), 3000);
+    return () => { current = false; window.clearInterval(timer); };
   }, [listId]);
-  const list = lists.find(list => list.id === listId) ?? view;
+  const list = view?.id === listId ? view : lists.find(list => list.id === listId);
   if (list) return <ListDetail key={list.id} list={list} refresh={reload} />;
   return <Page><PageHeader title="List" />{error ? <ErrorBanner message={error} /> : <PageLoading label="Loading saved list…" />}<Link to="/todo">Back To To Do</Link></Page>;
 }

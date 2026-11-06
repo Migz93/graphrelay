@@ -28,3 +28,14 @@ test("grocery aliases and pack sizes work without changing the item title", () =
   const actual = new Map(planTitles(tasks, "off", aisles, {}).map(item => [item.next, item.aisle]));
   deepEqual(names.map(name => actual.get(name)), ["Frozen", "Frozen", "Produce", "Dairy", "Pantry", "Pantry", "Pantry", "Pantry", "Other", "Other"]);
 });
+
+test("two-digit numbering replaces tracked prefixes and widens at 100 open items", () => {
+  const tasks = [{ id: "peas", title: "001 · Peas" }];
+  const originals = { peas: { base: "Peas", applied: "001 · Peas" } };
+  deepEqual(planTitles(tasks, "number-2", aisles, originals).map(task => task.next), ["01 · Peas"]);
+  const many = Array.from({ length: 100 }, (_, i) => ({ id: String(i), title: "Task " + String(i).padStart(3, "0") }));
+  deepEqual(planTitles(many.slice(0, 99), "number-2", aisles, {}).map(task => task.next).slice(-1), ["99 · Task 098"]);
+  const numbered = planTitles(many, "number-2", aisles, {}).map(task => task.next);
+  deepEqual([numbered[0], numbered[99]], ["001 · Task 000", "100 · Task 099"]);
+  deepEqual(numbered, [...numbered].sort());
+});

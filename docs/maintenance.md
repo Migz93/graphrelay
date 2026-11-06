@@ -21,7 +21,7 @@ Restore with GraphRelay stopped and keep the original key source. Verify ownersh
 
 Manual duplicate cleanup runs on the server after confirmation. Closing the dialog does not cancel it. A restart stops unfinished work and clears progress. Deletions already accepted by Microsoft remain applied. Refresh the preview before retrying.
 
-To recover an interrupted unenrollment, reopen **List Settings → Enrollment** and retry. GraphRelay pauses automation on that list while restoration is pending.
+To recover an interrupted unenrollment, reopen **List Settings → General** and retry **Unenroll List**. GraphRelay pauses automation on that list while restoration is pending.
 
 To reset a disposable installation, stop its container before clearing its data volume. This discards setup, sessions, enrollments, profiles and feed links. Reset a live instance only at the owner’s request.
 

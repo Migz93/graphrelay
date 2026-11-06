@@ -13,7 +13,7 @@ import { createCalendarFeeds, isCalendarGraphRead } from "./calendar-feeds.js";
 import { groceryItems } from "./groceries.js";
 import { GroupingStore, type Profile } from "./grouping-store.js";
 import { duplicateGroups } from "./duplicates.js";
-import { aisles, capitalizeWords, itemKey, planTitles, type Mode } from "./ordering.js";
+import { aisles, capitalizeWords, itemKey, modes, planTitles, type Mode } from "./ordering.js";
 
 declare module "express-session" {
   interface SessionData {
@@ -224,6 +224,7 @@ async function refreshDirectory() {
 }
 const active = new Set<string>();
 const snapshotRefreshes = new Map<string, Promise<void>>();
+const settingsSyncKey = (id: string) => "list-settings-sync:" + id;
 const unenrollKey = (id: string) => "unenroll:" + id;
 function log(listId: string, message: string) {
   db.prepare("INSERT INTO activity (list_id, message) VALUES (?, ?)").run(listId, message);
@@ -299,12 +300,16 @@ function planList(list: Enrolled, tasks: Task[], recoverTitles = false) {
   const profile = listProfile(list);
   return planTitles(tasks, list.mode, profile.groups.map(group => group.name), originals, profileMatcher(profile));
 }
-async function run(list: Enrolled, includeCleanup = false) {
+async function run(list: Enrolled, fullSync: boolean) {
   if (active.has(list.id) || read(unenrollKey(list.id))) return;
+  const key = settingsSyncKey(list.id);
+  const pending = read(key);
+  const superseded = () => read(key) !== pending;
   active.add(list.id);
   try {
     const path = taskPath(list.id);
     const tasks = await collection<Task>(path);
+    if (superseded()) return;
     let changed = 0;
     const capitalize = capitalizeItems(list.id);
     for (const task of planList(list, tasks.filter(task => task.status !== "completed"), true)) {
@@ -314,6 +319,7 @@ async function run(list: Enrolled, includeCleanup = false) {
       if (task.title === next) continue;
       const taskPath = path + "/" + encodeURIComponent(task.id);
       const current = await graph<Task>(taskPath);
+      if (superseded()) return;
       if (current.title !== task.title || current.status === "completed") continue;
       db.prepare("INSERT OR REPLACE INTO pending_titles VALUES (?, ?, ?, ?)").run(list.id, task.id, base, next);
       await graph(taskPath, { title: next });
@@ -326,7 +332,8 @@ async function run(list: Enrolled, includeCleanup = false) {
       log(list.id, task.title + " → " + next);
       changed++;
     }
-    const cleanup = includeCleanup && list.auto_cleanup ? await removeDuplicates(list) : undefined;
+    if (superseded()) return;
+    const cleanup = fullSync && enrolledList(list.id)?.auto_cleanup ? await removeDuplicates(list) : undefined;
     await syncSnapshot(list, changed || cleanup?.removed || cleanup?.failed ? undefined : tasks);
     if (cleanup?.failed) throw new Error("Run failed. Automatic duplicate cleanup could not remove " + cleanup.failed + " copies.");
     write("last:" + list.id, new Date().toISOString());
@@ -339,7 +346,9 @@ async function run(list: Enrolled, includeCleanup = false) {
     throw new Error(message);
   } finally {
     active.delete(list.id);
-    lastAttempts.set(list.id, Date.now());
+    // Keep a newer save queued if it arrived while this run was active.
+    if (pending && !superseded()) db.prepare("DELETE FROM state WHERE key = ?").run(key);
+    if (fullSync) lastAttempts.set(list.id, Date.now());
     schedulePoll();
   }
 }
@@ -361,13 +370,16 @@ function pollableLists() {
 function scheduledInterval(id: string) {
   return enrolledList(id) ? intervalMinutes(id) : pollingMinutes();
 }
+function listPollDue(id: string) {
+  return (lastAttempts.get(id) ?? 0) + scheduledInterval(id) * 60_000;
+}
 function schedulePoll(delay?: number) {
   clearTimeout(pollTimer);
   if (sweeping) return;
   if (delay === undefined) {
     const now = Date.now();
     const directoryDue = lastDirectoryPoll + pollingMinutes() * 60_000;
-    const next = pollableLists().reduce((due, id) => (active.has(id) || read(unenrollKey(id))) ? due : Math.min(due, (lastAttempts.get(id) ?? 0) + scheduledInterval(id) * 60_000), directoryDue);
+    const next = pollableLists().reduce((due, id) => (active.has(id) || read(unenrollKey(id))) ? due : Math.min(due, read(settingsSyncKey(id)) ? now : listPollDue(id)), directoryDue);
     delay = msal && read("username") ? Math.max(0, next - now) : pollingMinutes() * 60_000;
   }
   pollTimer = setTimeout(pollLists, delay).unref();
@@ -381,10 +393,12 @@ async function pollLists() {
       await syncDirectory();
     }
     for (const id of pollableLists()) {
-      if (active.has(id) || read(unenrollKey(id)) || Date.now() < (lastAttempts.get(id) ?? 0) + scheduledInterval(id) * 60_000) continue;
+      if (active.has(id) || read(unenrollKey(id))) continue;
+      const due = Date.now() >= listPollDue(id);
+      if (!due && !read(settingsSyncKey(id))) continue;
       const enrolled = enrolledList(id);
       const list = enrolled ?? knownList(id);
-      if (list) await (enrolled ? run(enrolled, true) : refreshListSnapshot(list)).catch(() => undefined);
+      if (list) await (enrolled ? run(enrolled, due) : refreshListSnapshot(list)).catch(() => undefined);
     }
   } finally {
     sweeping = false;
@@ -676,11 +690,6 @@ app.post("/api/lists/:id/enroll", async (req, res) => {
 app.post("/api/lists/:id/unenroll", async (req, res) => {
   const list = enrolledList(req.params.id);
   if (!list) { res.sendStatus(204); return; }
-  const { restorePrefixes } = req.body ?? {};
-  if (typeof restorePrefixes !== "boolean") {
-    res.status(400).json({ error: "Choose whether to restore item names." });
-    return;
-  }
   if (active.has(list.id)) {
     res.status(409).json({ error: "Wait for the current list run to finish, then try again." });
     return;
@@ -688,7 +697,8 @@ app.post("/api/lists/:id/unenroll", async (req, res) => {
   active.add(list.id);
   try {
     write(unenrollKey(list.id), "pending");
-    if (restorePrefixes) {
+    const tracked = db.prepare("SELECT 1 FROM titles WHERE list_id = ? UNION ALL SELECT 1 FROM pending_titles WHERE list_id = ? LIMIT 1").get(list.id, list.id);
+    if (tracked) {
       const path = taskPath(list.id);
       const tasks = await collection<Task>(path);
       const restored = planList({ ...list, mode: "off" }, tasks);
@@ -709,24 +719,24 @@ app.post("/api/lists/:id/unenroll", async (req, res) => {
       for (const table of ["titles", "pending_titles", "activity"]) {
         db.prepare("DELETE FROM " + table + " WHERE list_id = ?").run(list.id);
       }
-      for (const key of [unenrollKey(list.id), profileKey(list.id), intervalKey(list.id), capitalizeItemsKey(list.id), "snapshot:" + list.id, "last:" + list.id, "error:" + list.id]) {
+      for (const key of [unenrollKey(list.id), settingsSyncKey(list.id), profileKey(list.id), intervalKey(list.id), capitalizeItemsKey(list.id), "snapshot:" + list.id, "last:" + list.id, "error:" + list.id]) {
         db.prepare("DELETE FROM state WHERE key = ?").run(key);
       }
     })();
     lastAttempts.delete(list.id);
     res.sendStatus(204);
   } catch {
-    res.status(502).json({ error: "Unenrollment could not finish. Automatic runs are paused for this list. Retry unenrolling to continue, or turn off name restoration to keep the current titles." });
+    res.status(502).json({ error: "Unenrollment could not finish. Automatic runs are paused for this list. Retry unenrolling to finish restoring the item names." });
   } finally {
     active.delete(list.id);
     schedulePoll();
   }
 });
-app.put("/api/lists/:id", async (req, res) => {
+app.put("/api/lists/:id", (req, res) => {
   const list = enrolledList(req.params.id);
   if (!list) { res.sendStatus(404); return; }
   const { mode, profileId, autoCleanup, syncMinutes, capitalizeItems: capitalize } = req.body ?? {};
-  if (!["named", "number", "off"].includes(mode) || !profiles().some(profile => profile.id === profileId)
+  if (!modes.includes(mode) || !profiles().some(profile => profile.id === profileId)
     || typeof autoCleanup !== "boolean" || (syncMinutes !== null && !pollingOptions.includes(syncMinutes))) {
     res.status(400).json({ error: "Choose a valid grouping profile, prefix style and sync interval." });
     return;
@@ -735,15 +745,18 @@ app.put("/api/lists/:id", async (req, res) => {
     res.status(400).json({ error: "Choose whether to capitalize item names." });
     return;
   }
-  if (active.has(list.id) || read(unenrollKey(list.id))) { res.status(409).json({ error: "Wait for the current run or finish unenrolling this list." }); return; }
+  if (read(unenrollKey(list.id))) { res.status(409).json({ error: "Finish unenrolling this list before changing its settings." }); return; }
+  const updateTitles = mode !== list.mode
+    || (mode !== "off" && profileId !== (read(profileKey(list.id)) ?? "groceries"))
+    || (capitalize !== undefined && capitalize !== capitalizeItems(list.id));
   db.transaction(() => {
     db.prepare("UPDATE lists SET mode = ?, auto_cleanup = ? WHERE id = ?").run(mode, Number(autoCleanup), list.id);
     write(profileKey(list.id), profileId);
     if (capitalize !== undefined) write(capitalizeItemsKey(list.id), capitalize ? "1" : "0");
     write(intervalKey(list.id), syncMinutes === null ? "" : String(syncMinutes));
+    if (updateTitles) write(settingsSyncKey(list.id), randomBytes(16).toString("hex"));
   })();
-  // Saving settings applies grouping without triggering duplicate deletion.
-  await run(enrolledList(list.id)!).catch(() => undefined);
+  schedulePoll();
   res.sendStatus(204);
 });
 function enrolledList(id: string) {
@@ -943,6 +956,7 @@ async function removeDuplicates(list: Enrolled, proposed?: ProposedDuplicate[], 
   let skipped = 0;
   let failed = 0;
   for (const request of requests.values()) {
+    if (!proposed && !enrolledList(list.id)?.auto_cleanup) break;
     try {
       const group = groups.get(request.key);
       const copy = group?.copies.find(task => task.id === request.id);
@@ -965,6 +979,7 @@ async function removeDuplicates(list: Enrolled, proposed?: ProposedDuplicate[], 
         skipped++;
         continue;
       }
+      if (!proposed && !enrolledList(list.id)?.auto_cleanup) break;
       await graph(copyPath, undefined, "DELETE");
       removed++;
       log(list.id, (proposed ? "Removed duplicate: " : "Automatically removed duplicate: ") + latestCopy.title);
