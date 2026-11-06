@@ -2,7 +2,7 @@
 
 ## List Views And Enrollment
 
-**To Do** shows enrolled and unenrolled lists. All available lists are cached on a schedule. Open a list to view its synced titles in alphabetical order, including any GraphRelay prefixes. Completed items stay in a collapsed section. An unenrolled list can be viewed, refreshed on demand and cleaned up once through **Duplicates**.
+**To Do** shows enrolled and unenrolled lists. All available lists are cached on a schedule. Open a list to view its synced titles in alphabetical order, including any GraphRelay prefixes. Completed items stay in a collapsed section. On a grouped list, turn on **Show Groups** to see open items under their group headings with the prefixes hidden. This view defaults to off and remembers your choice for each list in the current browser. An unenrolled list can be viewed, refreshed on demand and cleaned up once through **Duplicates**.
 
 Select **Enroll List** from the list and confirm. Enrollment starts with grouping, title capitalization and automatic cleanup off. Use **List Settings → General** for capitalization, automatic cleanup, the sync override and unenrollment. Use **Grouping** for the profile and prefix style. **Save List Settings** stores the settings and keeps the dialog open. Title changes are applied in the background. Set the default polling interval in **Settings → To Do → General**. Enrolled lists can override it. [Sync](sync.md)
 

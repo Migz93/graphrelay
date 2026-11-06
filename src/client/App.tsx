@@ -4,12 +4,12 @@ import { CSS } from "@dnd-kit/utilities";
 import { cn } from "./lib/utils";
 import { useActionFeedback } from "./lib/useActionFeedback";
 import { compactMatches, groupingDraft, matchKey, moveMatch, removeGroup, type GroupDraft, type MatchGroup } from "./lib/groupingDraft";
-import { ChevronRight, GripVertical, Minus, Plus, X } from "lucide-react";
+import { ChevronRight, Eye, EyeOff, GripVertical, Minus, Plus, X } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import Layout, { type BuildInfo } from "./components/Layout";
 import { ErrorBanner, Page, PageHeader, PageLoading } from "./components/Page";
-import { dangerButtonClass, SectionCard, SelectInput, SettingRow, SettingToggle, TextInput, primaryButtonClass, secondaryButtonClass, successButtonClass } from "./components/FormControls";
+import { compactSecondaryButtonClass, dangerButtonClass, SectionCard, SelectInput, SettingRow, SettingToggle, TextInput, primaryButtonClass, secondaryButtonClass, successButtonClass } from "./components/FormControls";
 
 import { api, sessionExpiredEvent, SessionExpiredError } from "./lib/api";
 import CalendarFeeds, { CalendarSettings } from "./CalendarFeeds";
@@ -354,7 +354,11 @@ function EditItemGroup({ path, item, close }: { path: string; item: SyncedItem; 
   </SettingsDialog>;
 }
 
-function ListItems({ path, grouped }: { path: string; grouped: boolean }) {
+function ListItems({ path, grouped, order }: { path: string; grouped: boolean; order: string[] }) {
+  const storageKey = "graphrelay:todo:show-groups:" + path;
+  const [showGroups, setShowGroups] = useState(() => {
+    try { return localStorage.getItem(storageKey) === "1"; } catch { return false; }
+  });
   const [snapshot, setSnapshot] = useState<ItemSnapshot>();
   const [error, setError] = useState("");
   const [editing, setEditing] = useState<SyncedItem>();
@@ -373,30 +377,62 @@ function ListItems({ path, grouped }: { path: string; grouped: boolean }) {
     return () => { active = false; window.clearInterval(timer); };
   }, [path]);
 
+  function toggleGroups() {
+    const next = !showGroups;
+    setShowGroups(next);
+    try {
+      if (next) localStorage.setItem(storageKey, "1");
+      else localStorage.removeItem(storageKey);
+    } catch { /* Optional browser preference. */ }
+  }
+
   const items = [...(snapshot?.items ?? [])].sort(bySyncedTitle);
-  return <div className="grid gap-3 rounded-lg bg-background-container-low p-4">
-    <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-      <h2 className="font-medium">Open Items{snapshot?.syncedAt && " (" + snapshot.items.length + ")"}</h2>
-      {snapshot?.syncedAt && <p className="text-xs text-on-surface-variant">Items synced {new Date(snapshot.syncedAt).toLocaleString()}</p>}
-    </div>
-    {error && <ErrorBanner message={error} />}
-    {!snapshot && !error && <p>Loading open items…</p>}
-    {snapshot?.syncedAt === null && <p>Waiting for the first Microsoft sync.</p>}
-    {snapshot?.syncedAt && !snapshot.items.length && <p>No open items.</p>}
-    {!!items.length && <ul className="overflow-hidden rounded-lg border border-outline-variant/30 bg-background-container">
-      {items.map((item, index) => {
-        const previous = items[index - 1];
-        const groupBreak = grouped && previous?.title && item.title && previous.aisle !== item.aisle;
+  const expanded = grouped && showGroups;
+  const sections = new Map<string, SyncedItem[]>();
+  if (expanded) {
+    for (const group of new Set([...order, "Other"])) sections.set(group, []);
+    for (const item of items) (sections.get(item.aisle ?? "") ?? sections.get("Other"))?.push(item);
+  }
+
+  function renderItems(rows: SyncedItem[]) {
+    return <ul className="overflow-hidden rounded-lg border border-outline-variant/30 bg-background-container">
+      {rows.map((item, index) => {
+        const previous = rows[index - 1];
+        const groupBreak = grouped && !expanded && previous?.title && item.title && previous.aisle !== item.aisle;
         return <li key={item.id} className={cn("break-words text-sm", previous && "border-t", groupBreak ? "border-outline-variant" : "border-outline-variant/30")}>
           {grouped
             ? <button type="button" aria-haspopup="dialog" className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-background-bright focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary" onClick={() => setEditing(item)}>
-              <span className="min-w-0 break-words">{syncedTitle(item)}</span>
+              <span className="min-w-0 break-words">{expanded ? item.name : syncedTitle(item)}</span>
               <ChevronRight size={14} className="shrink-0 text-on-surface-variant" aria-hidden="true" />
             </button>
             : <span className="block px-3 py-2">{syncedTitle(item)}</span>}
         </li>;
       })}
-    </ul>}
+    </ul>;
+  }
+
+  return <div className="grid gap-3 rounded-lg bg-background-container-low p-4">
+    <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+      <h2 className="font-medium">Open Items{snapshot?.syncedAt && " (" + snapshot.items.length + ")"}</h2>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        {snapshot?.syncedAt && <p className="text-xs text-on-surface-variant">Items synced {new Date(snapshot.syncedAt).toLocaleString()}</p>}
+        {grouped && <button type="button" className={cn(compactSecondaryButtonClass, showGroups && "border-primary/60")}
+          aria-pressed={showGroups} onClick={toggleGroups}>
+          {showGroups ? <Eye size={14} aria-hidden="true" /> : <EyeOff size={14} aria-hidden="true" />}
+          Show Groups
+        </button>}
+      </div>
+    </div>
+    {error && <ErrorBanner message={error} />}
+    {!snapshot && !error && <p>Loading open items…</p>}
+    {snapshot?.syncedAt === null && <p>Waiting for the first Microsoft sync.</p>}
+    {snapshot?.syncedAt && !snapshot.items.length && <p>No open items.</p>}
+    {!!items.length && (expanded
+      ? Array.from(sections, ([group, rows]) => rows.length > 0 && <section key={group} className="grid gap-1.5">
+        <h3 className="text-sm font-medium">{group}</h3>
+        {renderItems(rows)}
+      </section>)
+      : renderItems(items))}
     {snapshot?.syncedAt && <details className="rounded-lg border border-outline-variant/30 bg-background-container px-3 py-2">
       <summary className="cursor-pointer py-1 text-sm font-medium">Completed Items ({snapshot.completed?.length ?? 0})</summary>
       {snapshot.completed?.length ? <ul className="mt-2 divide-y divide-outline-variant/30">
@@ -951,7 +987,7 @@ function ListDetail({ list, refresh }: { list: List; refresh: () => Promise<void
     {showDuplicates && <SettingsDialog title="Duplicates" tabs={[]} selected="" select={() => undefined} close={() => setShowDuplicates(false)}>
       <DuplicatePreview key={previewRevision} path={path} onRemoved={() => { setItemRevision(value => value + 1); setHistory(undefined); void refresh(); }} />
     </SettingsDialog>}
-    <ListItems key={itemRevision} path={path} grouped={list.enrolled && list.mode !== "off" && !list.unenrollPending} />
+    <ListItems key={itemRevision} path={path} order={list.order} grouped={list.enrolled && list.mode !== "off" && !list.unenrollPending} />
     {settings && list.enrolled && <ListSettings list={list} refresh={refresh} close={() => setSettings(false)} />}
   </Page>;
 }
