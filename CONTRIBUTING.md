@@ -2,7 +2,7 @@
 
 ## Workflow
 
-Start work on a task branch based on `develop`. Target `develop` for changes and reserve `main` for releases. Read the [workflow reference](docs/workflow.md) before opening a PR or tagging a release.
+GraphRelay’s maintainers work directly on `main` during early development. For an external contribution, target `main` if opening a PR. The maintainer will announce when the project switches to `develop` and the sibling apps’ PR workflow. See the [workflow reference](docs/workflow.md).
 
 ## Pull Requests
 

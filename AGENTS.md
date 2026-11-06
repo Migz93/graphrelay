@@ -31,6 +31,6 @@ Use the [technical docs index](docs/README.md) to find feature details. Update t
 
 ## Development and Deployment
 
-Check both checkouts for branch and dirty state. Use the private workspace runbook for direct SSH development. Edit the server checkout and install dependencies and run checks as `node` in the dedicated GraphRelay devcontainer. Run authenticated Git and Docker operations on the host. Synchronize the task branch through GitHub. Use PRs to integrate work into `develop` or release to `main`.
+Check both checkouts for branch and dirty state. Use the private workspace runbook for direct SSH development. Edit the server checkout and install dependencies and run checks as `node` in the dedicated GraphRelay devcontainer. Run authenticated Git and Docker operations on the host. Work directly on `main` and synchronize it through GitHub during early development. The maintainer will explicitly switch GraphRelay to the `develop` and PR workflow when ready.
 
 Keep credentials, token caches, session details, private host details, subscription URLs and live list contents out of Git and logs. Use disposable data for tests. For changes to the running app, replace the existing test container with the exact smoke-tested candidate as authorized by the owner, preserve its config and verify health. Documentation-only and review-only work does not trigger deployment.
