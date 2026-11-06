@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { CalendarDays, ChevronRight, ClipboardList, ListChecks, type LucideIcon } from "lucide-react";
 import { ErrorBanner, Page, PageHeader, PageLoading } from "./components/Page";
 import { SectionCard, compactSecondaryButtonClass } from "./components/FormControls";
@@ -78,11 +78,12 @@ function UpcomingEvents({ calendar }: { calendar: DashboardData["calendar"] }) {
       </div>)}
     </div>}
     {!!snapshot?.failed.length && !!events.length && <p className="text-xs text-on-surface-variant">Some calendars could not refresh.</p>}
-    <div><Link to={calendar.connected ? "/calendar" : "/settings"} className={compactSecondaryButtonClass}>{calendar.connected ? "Open Calendar" : "Microsoft Settings"}</Link></div>
+    <div><Link to={calendar.connected ? "/calendar" : "/settings?tab=microsoft"} className={compactSecondaryButtonClass}>{calendar.connected ? "Open Calendar" : "Microsoft Settings"}</Link></div>
   </SectionCard>;
 }
 
 export default function Dashboard() {
+  const { state } = useLocation();
   const [data, setData] = useState<DashboardData>();
   const [error, setError] = useState("");
   useEffect(() => {
@@ -100,13 +101,16 @@ export default function Dashboard() {
     return () => { active = false; clearInterval(timer); };
   }, []);
   const attention = data ? [
-    ...(!data.connected ? [{ label: "Connect Microsoft", path: "/settings" }] : []),
+    ...(!data.connected ? [{ label: "Connect Microsoft", path: "/settings?tab=microsoft" }] : []),
     ...data.lists.filter(list => list.error).map(list => ({ label: list.name + " needs attention", path: listPath(list.id) })),
     ...(data.calendar.error ? [{ label: "Microsoft calendars could not refresh", path: "/calendar?tab=feeds" }] : []),
     ...data.calendar.failedFeeds.map(feed => ({ label: feed.name + " could not refresh", path: "/calendar?tab=feeds#feed-" + feed.id })),
   ] : [];
   return <Page className="space-y-4">
     <PageHeader title="Dashboard" />
+    {state?.microsoftSetupDeferred && <p role="status" className="text-sm text-on-surface-variant">
+      You can connect your account any time in <Link to="/settings?tab=microsoft" className="underline underline-offset-2">Settings → Microsoft</Link>.
+    </p>}
     {error && <ErrorBanner message={error} />}
     {!data && !error && <PageLoading label="Loading Dashboard…" />}
     {data && <nav aria-label="Dashboard Stats" className="grid grid-cols-3 gap-2 sm:gap-3">

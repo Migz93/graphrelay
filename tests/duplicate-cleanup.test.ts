@@ -29,7 +29,7 @@ test("large duplicate cleanup keeps protected copies and reports progress after 
   ]);
   const base = "http://127.0.0.1:" + port;
   const headers = { "Content-Type": "application/json", "X-GraphRelay": "1", cookie: "" };
-  const login = await fetch(base + "/api/login", { method: "POST", headers, body: JSON.stringify({ password: "fixture" }) });
+  const login = await fetch(base + "/api/login", { method: "POST", headers, body: JSON.stringify({ username: "admin", password: "fixture" }) });
   assert.equal(login.status, 204);
   headers.cookie = login.headers.get("set-cookie")!.split(";")[0];
   const path = "/api/lists/fixture/duplicates";

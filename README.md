@@ -15,8 +15,8 @@ Connect one Microsoft account from GraphRelay’s web UI. Background jobs keep l
 ## Quick Start
 
 1. Run GraphRelay in Docker with a writable volume mounted at `/config`. The app listens on port `9304`. See [Deployment](docs/deployment.md) for Docker and Compose examples.
-2. Open the app and create an admin password. If you use an HTTPS hostname, set **Public URL** in **Settings → General → Network** first.
-3. Register an app in Microsoft Entra, save its client ID and secret value in GraphRelay, then select **Connect Microsoft**. See [Microsoft setup](docs/microsoft.md).
+2. Open the app and create your local admin username and password.
+3. Choose **Set Up Microsoft** to follow the checklist in **Settings → Microsoft**, or choose **Later** to go to the dashboard. See [Microsoft setup](docs/microsoft.md).
 
 ## To Do
 

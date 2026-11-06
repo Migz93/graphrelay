@@ -26,7 +26,7 @@ SQLite uses WAL mode. Startup creates missing tables, adds the automatic cleanup
 
 ## Auth And Setup
 
-The web UI uses a local admin password with a salted scrypt hash. GraphRelay encrypts setup, the MSAL token cache and persisted web session payloads with AES-256-GCM. The same persistent key also underlies cookie signing. A valid session survives a container replacement using the same key and data directory. Session records expire after seven days of inactivity.
+The web UI uses a local admin username and password. The password has a salted scrypt hash. Older password-only setups use `admin` as the username. GraphRelay encrypts setup, the MSAL token cache and persisted web session payloads with AES-256-GCM. The same persistent key also underlies cookie signing. A valid session survives a container replacement using the same key and data directory. Session records expire after seven days of inactivity.
 
 Microsoft OAuth uses a separate delegated connection. GraphRelay stores the OAuth state and PKCE verifier in the admin session and checks them on callback. Most API routes require an admin session. Mutating API requests also require the app’s request header. Tokenized calendar subscriptions are separate from the admin API and scoped to the connected calendar account. [Microsoft setup](microsoft.md)
 

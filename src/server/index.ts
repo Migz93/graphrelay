@@ -107,10 +107,11 @@ function microsoftClient(clientId: string, clientSecret: string) {
     } },
   });
 }
-type Setup = { clientId?: string; clientSecret?: string; salt: string; passwordHash: string };
+type Setup = { adminUsername?: string; clientId?: string; clientSecret?: string; salt: string; passwordHash: string };
 const savedSetup = read("setup");
 let setup = savedSetup ? JSON.parse(decrypt(savedSetup)) as Setup : undefined;
 const legacySetup = Boolean(env.APP_SECRET && env.ADMIN_PASSWORD && env.MICROSOFT_CLIENT_ID && env.MICROSOFT_CLIENT_SECRET);
+const adminUsername = () => setup?.adminUsername ?? "admin";
 const adminConfigured = () => !!setup || legacySetup;
 let msal = setup?.clientId && setup.clientSecret
   ? microsoftClient(setup.clientId, setup.clientSecret)
@@ -426,7 +427,7 @@ const build = {
   channel: env.BUILD_CHANNEL ?? "custom",
   revision: env.COMMIT_SHA ?? "local",
 };
-app.get("/api/session", (req, res) => { res.json({ configured: adminConfigured(), signedIn: !!req.session.admin, ...(req.session.admin ? { build } : {}) }); });
+app.get("/api/session", (req, res) => { res.json({ configured: adminConfigured(), signedIn: !!req.session.admin, ...(req.session.admin ? { build, username: adminUsername() } : {}) }); });
 app.use("/api", (req, res, next) => {
   if (req.method !== "GET" && req.get("X-GraphRelay") !== "1") {
     res.sendStatus(403);
@@ -436,14 +437,24 @@ app.use("/api", (req, res, next) => {
 });
 app.post("/api/setup", (req, res) => {
   if (adminConfigured()) { res.sendStatus(409); return; }
-  if (req.get("Origin") !== network.publicUrl) { res.sendStatus(403); return; }
-  const { password } = req.body ?? {};
+  const origin = req.get("Origin");
+  const fetchSite = req.get("Sec-Fetch-Site");
+  if (!origin || (fetchSite !== "same-origin" && origin !== network.publicUrl && origin !== req.protocol + "://" + req.get("Host"))) {
+    res.status(403).json({ error: "Open GraphRelay directly in your browser and try creating the account again." });
+    return;
+  }
+  const { username, password } = req.body ?? {};
+  const name = typeof username === "string" ? username.trim() : "";
+  if (!/^[a-z0-9][a-z0-9_.@-]{0,63}$/i.test(name)) {
+    res.status(400).json({ error: "Enter a username starting with a letter or number, up to 64 characters. You can also use dots, underscores, hyphens and @." });
+    return;
+  }
   if (typeof password !== "string" || !password.trim() || password.length > 256) {
     res.status(400).json({ error: "Enter an admin password of up to 256 characters." });
     return;
   }
   const salt = randomBytes(16).toString("hex");
-  const configuration = { salt, passwordHash: scryptSync(password, salt, 32).toString("hex") };
+  const configuration = { adminUsername: name, salt, passwordHash: scryptSync(password, salt, 32).toString("hex") };
   write("setup", encrypt(JSON.stringify(configuration)));
   setup = configuration;
   res.sendStatus(204);
@@ -454,12 +465,12 @@ app.post("/api/login", (req, res, next) => {
   if (!adminConfigured()) { res.sendStatus(503); return; }
   if (Date.now() > resetAt) { failures = 0; resetAt = Date.now() + 60_000; }
   if (failures >= 10) { res.sendStatus(429); return; }
-  const password = req.body?.password;
+  const { username, password } = req.body ?? {};
   const digest = (value: string) => createHash("sha256").update(value).digest();
   const valid = typeof password === "string" && password.length <= 1024 && (setup
     ? timingSafeEqual(scryptSync(password, setup.salt, 32), Buffer.from(setup.passwordHash, "hex"))
     : timingSafeEqual(digest(password), digest(env.ADMIN_PASSWORD!)));
-  if (!valid) {
+  if (!valid || typeof username !== "string" || username.trim().toLowerCase() !== adminUsername().toLowerCase()) {
     failures++;
     res.sendStatus(401);
     return;
@@ -510,7 +521,7 @@ app.get("/api/dashboard", (_req, res) => {
   });
 });
 app.use("/api/calendar-feeds", calendarFeeds.admin);
-app.get("/api/microsoft", (_req, res) => { res.json({ account: read("username") ?? null, calendarAccess: !!calendarAccount(), redirectUri: microsoftRedirectUri(), clientId: setup?.clientId ?? (legacySetup ? env.MICROSOFT_CLIENT_ID : null), editable: !!setup }); });
+app.get("/api/microsoft", (_req, res) => { res.json({ account: read("username") ?? null, calendarAccess: !!calendarAccount(), redirectUri: microsoftRedirectUri(), trustProxy: network.trustProxy, clientId: setup?.clientId ?? (legacySetup ? env.MICROSOFT_CLIENT_ID : null), editable: !!setup }); });
 app.put("/api/microsoft", (req, res) => {
   if (req.get("Origin") !== network.publicUrl) { res.sendStatus(403); return; }
   if (!setup) { res.sendStatus(409); return; }
@@ -534,6 +545,23 @@ app.put("/api/microsoft", (req, res) => {
   delete req.session.oauth;
   res.sendStatus(204);
 });
+app.post("/api/microsoft/test", async (_req, res) => {
+  const account = read("account");
+  const client = msal;
+  if (!client || !account || !read("username")) {
+    res.status(409).json({ error: "Connect Microsoft before testing access." });
+    return;
+  }
+  const [todo, calendar] = await Promise.all([
+    graph("me/todo/lists").then(() => true, () => false),
+    calendarAccount() ? graph("me/calendars?$select=id,name").then(() => true, () => false) : null,
+  ]);
+  if (client !== msal || account !== read("account")) {
+    res.status(409).json({ error: "The Microsoft connection changed. Try testing again." });
+    return;
+  }
+  res.json({ todo, calendar });
+});
 app.post("/api/microsoft/connect", async (req, res) => {
   if (!msal) { res.status(409).json({ error: "Save your Microsoft app credentials first." }); return; }
   const requestOrigin = req.get("Origin");
@@ -556,11 +584,11 @@ app.get("/api/microsoft/callback", async (req, res) => {
     const code = /^[a-z_]{1,50}$/.test(req.query.error) ? req.query.error : "unknown";
     const detail = typeof req.query.error_description === "string" ? req.query.error_description.match(/AADSTS[0-9]{4,10}/)?.[0] : undefined;
     console.warn("Microsoft authorization rejected", detail ?? code);
-    res.redirect("/settings?connection=failed&reason=" + (detail ?? code));
+    res.redirect("/settings?tab=microsoft&connection=failed&reason=" + (detail ?? code));
     return;
   }
   if (!pending || pending.redirectUri !== microsoftRedirectUri() || Date.now() - pending.issued > 600_000 || req.query.state !== pending.state || typeof req.query.code !== "string") {
-    res.redirect("/settings?connection=failed&reason=session");
+    res.redirect("/settings?tab=microsoft&connection=failed&reason=session");
     return;
   }
   try {
@@ -568,7 +596,7 @@ app.get("/api/microsoft/callback", async (req, res) => {
     if (!result.account) throw new Error("Missing Microsoft account.");
     const current = read("account");
     if (current && current !== result.account.homeAccountId && (db.prepare("SELECT 1 FROM lists LIMIT 1").get() || db.prepare("SELECT 1 FROM calendar_feeds WHERE account = ? LIMIT 1").get(current))) {
-      res.redirect("/settings?connection=wrong-account");
+      res.redirect("/settings?tab=microsoft&connection=wrong-account");
       return;
     }
     write("account", result.account.homeAccountId);
@@ -579,12 +607,12 @@ app.get("/api/microsoft/callback", async (req, res) => {
     void calendarFeeds.refresh();
     lastDirectoryPoll = 0;
     schedulePoll(0);
-    res.redirect("/settings");
+    res.redirect("/settings?tab=microsoft&connection=connected");
   } catch (error) {
     const detail = error instanceof Error ? error.message.match(/AADSTS[0-9]{4,10}/)?.[0] : undefined;
     const reason = detail ?? "token-exchange";
     console.warn("Microsoft token exchange failed", reason);
-    res.redirect("/settings?connection=failed&reason=" + reason);
+    res.redirect("/settings?tab=microsoft&connection=failed&reason=" + reason);
   }
 });
 app.get("/api/polling", (_req, res) => {

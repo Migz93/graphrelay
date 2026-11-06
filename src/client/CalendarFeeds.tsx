@@ -310,7 +310,7 @@ export default function CalendarFeeds() {
     {(error || status?.error) && <ErrorBanner message={error || status!.error!} />}
     {!status && !error && <PageLoading label="Loading Calendars…" />}
     {status && !status.connected && <SectionCard title="Microsoft Calendar Access" description="Enable read access for your existing Microsoft connection to discover calendars.">
-      <div><Link to="/settings" className={primaryButtonClass}>Open Microsoft Settings</Link></div>
+      <div><Link to="/settings?tab=microsoft" className={primaryButtonClass}>Open Microsoft Settings</Link></div>
     </SectionCard>}
     {status?.connected && <>
       <nav aria-label="Calendar Sections" className="flex w-fit gap-1 rounded-xl bg-background-container-high p-1">

@@ -23,7 +23,7 @@ docker run -d --name graphrelay --restart unless-stopped \
   -p 127.0.0.1:9304:9304 -v graphrelay-config:/config graphrelay:local
 ```
 
-Open `http://localhost:9304` on the Docker host, or reach that address through an SSH tunnel from your browser. Keep a fresh instance private until you set the admin password.
+Open `http://localhost:9304` on the Docker host, or reach that address through an SSH tunnel from your browser. Keep a fresh instance private until you create the local admin account.
 
 ## Persistent Data
 
@@ -46,7 +46,7 @@ Back up the full volume and retain its encryption key or the same `APP_SECRET`. 
 | `APP_SECRET` | Generated key on disk | Optional stable key source. Keep an existing value unchanged when replacing the container. |
 | `ADMIN_PASSWORD`, `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET` | Unset | Legacy environment-based setup, used together with `APP_SECRET`. New installs use the web UI. |
 
-Saved **Public URL** and **Trust Proxy** settings override the environment defaults immediately. Public URL in the UI accepts an HTTPS origin or HTTP localhost. For a reverse proxy, set the browser-facing origin and enable trust only for one trusted hop. Configure that proxy to overwrite forwarded headers and send `X-Forwarded-Proto: https`. Register the callback displayed in GraphRelay. [Microsoft setup](microsoft.md)
+Saved **Public URL** and **Trust Proxy** settings override the environment defaults immediately. Public URL in the UI accepts an HTTPS origin or HTTP localhost. For a reverse proxy, set the browser-facing origin and enable trust only for one trusted hop. Configure that proxy to overwrite forwarded headers and send `X-Forwarded-Proto: https`. Register the callback displayed in **Settings → Microsoft**. [Microsoft setup](microsoft.md)
 
 ## Updates
 

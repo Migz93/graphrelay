@@ -21,7 +21,7 @@ export async function api<T>(path: string, method = "GET", body?: object): Promi
   }
   if (!response.ok) {
     const details = await response.json().catch(() => null);
-    throw new Error(details?.error ?? (response.status === 401 && path === "/login" ? "Incorrect admin password." : "Request failed (" + response.status + ")."));
+    throw new Error(details?.error ?? (response.status === 401 && path === "/login" ? "Incorrect username or password." : "Request failed (" + response.status + ")."));
   }
   if (path === "/login") sessionGeneration++;
   return response.status === 204 ? undefined as T : await response.json() as T;

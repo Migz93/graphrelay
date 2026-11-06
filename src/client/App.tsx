@@ -14,10 +14,10 @@ import { compactSecondaryButtonClass, dangerButtonClass, SectionCard, SelectInpu
 import { api, sessionExpiredEvent, SessionExpiredError } from "./lib/api";
 import CalendarFeeds, { CalendarSettings } from "./CalendarFeeds";
 import Dashboard from "./Dashboard";
+import MicrosoftSettings from "./MicrosoftSettings";
 import { SettingsDialog } from "./components/SettingsDialog";
 
-type Session = { configured: boolean } & ({ signedIn: false } | { signedIn: true; build: BuildInfo });
-type Connection = { account: string | null; calendarAccess: boolean; redirectUri: string; clientId: string | null; editable: boolean };
+type Session = { configured: boolean } & ({ signedIn: false } | { signedIn: true; build: BuildInfo; username: string });
 type List = {
   id: string; displayName: string; isShared: boolean; isOwner: boolean;
   enrolled: boolean; mode: string; order: string[]; lastRun?: string; error?: string;
@@ -26,6 +26,8 @@ type List = {
 type Activity = { created: string; message: string };
 
 function Login({ onLogin, firstRun = false }: { onLogin: () => void; firstRun?: boolean }) {
+  const navigate = useNavigate();
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -34,8 +36,9 @@ function Login({ onLogin, firstRun = false }: { onLogin: () => void; firstRun?: 
     setBusy(true);
     setError("");
     try {
-      if (firstRun) await api("/setup", "POST", { password });
-      await api("/login", "POST", { password });
+      if (firstRun) await api("/setup", "POST", { username, password });
+      await api("/login", "POST", { username, password });
+      if (firstRun) navigate("/setup/microsoft", { replace: true });
       onLogin();
     } catch (error) {
       setError((error as Error).message);
@@ -50,16 +53,20 @@ function Login({ onLogin, firstRun = false }: { onLogin: () => void; firstRun?: 
         <img src="/graphrelay-logo.svg" alt="" aria-hidden="true" className="size-11 object-contain" />
         <div>
           <h1 className="font-headline text-2xl font-bold text-on-surface">GraphRelay</h1>
-          <p className="text-sm text-on-surface-variant">{firstRun ? "Create the admin password" : "Sign in to continue"}</p>
+          <p className="text-sm text-on-surface-variant">{firstRun ? "Create your local admin account" : "Sign in to continue"}</p>
         </div>
       </div>
+      <label htmlFor="username" className="mb-2 block text-sm font-semibold text-on-surface">Username</label>
+      <input id="username" autoComplete="username" autoCapitalize="none" spellCheck={false} maxLength={64}
+        value={username} onChange={event => setUsername(event.target.value)} required
+        className="mb-4 w-full rounded-xl border border-outline-variant/40 bg-background-container px-4 py-3 text-on-surface outline-none focus:border-primary" />
       <label htmlFor="password" className="mb-2 block text-sm font-semibold text-on-surface">Password</label>
       <input id="password" type="password" autoComplete={firstRun ? "new-password" : "current-password"}
         value={password} onChange={event => setPassword(event.target.value)} required
         className="w-full rounded-xl border border-outline-variant/40 bg-background-container px-4 py-3 text-on-surface outline-none focus:border-primary" />
       {error && <div role="alert" className="mt-5 rounded-xl border border-error/30 bg-error/10 px-4 py-3 text-sm text-error">{error}</div>}
       <button type="submit" disabled={busy} className="mt-7 w-full rounded-xl bg-primary px-4 py-3 text-sm font-bold text-on-surface transition-colors hover:bg-primary-dim disabled:cursor-not-allowed disabled:opacity-60">
-        {busy ? "Please wait…" : firstRun ? "Create Admin Password" : "Sign In"}
+        {busy ? "Please wait…" : firstRun ? "Create Admin Account" : "Sign In"}
       </button>
     </form>
   </main>;
@@ -104,9 +111,9 @@ function PollingSettings() {
   </SectionCard>;
 }
 
-type Network = { publicUrl: string; trustProxy: boolean; redirectUri: string };
+type Network = { publicUrl: string; trustProxy: boolean };
 
-function NetworkSettings({ onSaved }: { onSaved: () => void }) {
+function NetworkSettings() {
   const [settings, setSettings] = useState<Network>();
   const [busy, setBusy] = useState(false);
   const { feedback: saved, showFeedback, clearFeedback } = useActionFeedback();
@@ -123,7 +130,6 @@ function NetworkSettings({ onSaved }: { onSaved: () => void }) {
     try {
       setSettings(await api<Network>("/network", "PUT", { publicUrl: settings.publicUrl, trustProxy: settings.trustProxy }));
       showFeedback(true);
-      onSaved();
     } catch (error) {
       setError((error as Error).message);
     } finally {
@@ -139,10 +145,6 @@ function NetworkSettings({ onSaved }: { onSaved: () => void }) {
         <TextInput type="url" value={settings.publicUrl} placeholder="https://graphrelay.example.com" disabled={busy} required
           onChange={publicUrl => { clearFeedback(); setSettings({ ...settings, publicUrl }); }} />
       </label>
-      <label className="grid gap-2 text-sm">Microsoft Redirect URI
-        <TextInput readOnly value={settings.redirectUri} onChange={() => undefined} onFocus={event => event.currentTarget.select()} />
-        <span className="text-on-surface-variant">Add this exact URL as a Web redirect URI in Microsoft Entra.</span>
-      </label>
       <div><button className={cn(primaryButtonClass, "min-w-32", saved && successButtonClass)} aria-live="polite" disabled={busy}>
         {busy ? "Saving…" : saved ? "Saved" : "Save Network"}
       </button></div>
@@ -150,98 +152,11 @@ function NetworkSettings({ onSaved }: { onSaved: () => void }) {
   </SectionCard>;
 }
 
-function MicrosoftSettings() {
-  const [connection, setConnection] = useState<Connection>();
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [clientId, setClientId] = useState("");
-  const [secret, setSecret] = useState("");
-  const [savedSecret, setSavedSecret] = useState(false);
-  const [savingSecret, setSavingSecret] = useState(false);
-  const { feedback: credentialsSaved, showFeedback, clearFeedback } = useActionFeedback();
-  async function saveSecret(event: FormEvent) {
-    event.preventDefault();
-    setError("");
-    clearFeedback();
-    setSavedSecret(false);
-    setSavingSecret(true);
-    try {
-      await api("/microsoft", "PUT", { clientId, clientSecret: secret });
-      setConnection(await api<Connection>("/microsoft"));
-      setSecret("");
-      setSavedSecret(true);
-      showFeedback(true);
-    } catch (error) {
-      setError((error as Error).message);
-    } finally {
-      setSavingSecret(false);
-    }
-  }
-  const [params] = useSearchParams();
-  useEffect(() => {
-    void api<Connection>("/microsoft").then(value => { setConnection(value); setClientId(value.clientId ?? ""); }).catch(error => setError(error.message));
-  }, []);
-  async function connect(calendarAccess = false) {
-    setBusy(true);
-    setError("");
-    try {
-      const { url } = await api<{ url: string }>("/microsoft/connect", "POST", { calendarAccess });
-      window.location.assign(url);
-    } catch (error) {
-      setError((error as Error).message);
-      setBusy(false);
-    }
-  }
-  const configuredOrigin = connection ? new URL(connection.redirectUri).origin : undefined;
-  const onConfiguredOrigin = window.location.origin === configuredOrigin;
-  const outcome = params.get("connection");
-  const reason = params.get("reason") ?? "";
-  const signInError = reason === "session"
-    ? "The Microsoft sign-in session expired or did not match. Start again from Connect Microsoft in this tab."
-    : "Microsoft sign-in failed." + (/^AADSTS[0-9]{4,10}$/.test(reason) ? " Microsoft error " + reason + "." : "") + " Try connecting again.";
-  return <div className="space-y-5">
-    {(error || (outcome && !savedSecret)) && <ErrorBanner message={error || (outcome === "wrong-account" ? "Reconnect using the Microsoft account that owns your enrolled lists or calendar feeds." : signInError)} />}
-    <SectionCard title="Microsoft Connection" description="Connect the Microsoft account for your To Do lists and calendars.">
-      {connection && <>
-        <SettingRow label="Account" action>
-          <button className={primaryButtonClass} onClick={() => void connect()} disabled={busy || !connection.clientId || !onConfiguredOrigin}>
-            {connection.account ? "Reconnect Microsoft" : "Connect Microsoft"}
-          </button>
-        </SettingRow>
-        {connection.account && <p>Connected as {connection.account}</p>}
-        <SettingRow label="Calendar Access" hint="Allow GraphRelay to read events for subscription feeds." action>
-          {connection.calendarAccess
-            ? <Link className={secondaryButtonClass} to="/calendar">Open Calendar</Link>
-            : <button className={secondaryButtonClass} onClick={() => void connect(true)} disabled={busy || !connection.clientId || !onConfiguredOrigin}>Enable Calendar Access</button>}
-        </SettingRow>
-        {!onConfiguredOrigin && <p className="text-sm text-on-surface-variant">
-          Open <a className="break-all underline" href={configuredOrigin + "/settings"}>{configuredOrigin}</a> to connect Microsoft or update app credentials.
-        </p>}
-        {connection.editable && <details open={!connection.clientId || outcome === "failed" || savedSecret}>
-          <summary className="cursor-pointer text-sm">Microsoft App Credentials</summary>
-          <form onSubmit={saveSecret} onChange={clearFeedback} className="mt-3 grid gap-3">
-            <label className="grid gap-2 text-sm">Application (Client) ID
-              <TextInput value={clientId} onChange={setClientId} autoComplete="off" required />
-            </label>
-            <label className="grid gap-2 text-sm">Client Secret Value
-              <TextInput type="password" value={secret} onChange={setSecret} autoComplete="off" required />
-            </label>
-            <div><button className={cn(secondaryButtonClass, "min-w-56", credentialsSaved && successButtonClass)} aria-live="polite" disabled={savingSecret}>
-              {savingSecret ? "Saving…" : credentialsSaved ? "Saved" : "Save Microsoft Credentials"}
-            </button></div>
-          </form>
-        </details>}
-      </>}
-    </SectionCard>
-  </div>;
-}
-
 function Settings({ build }: { build: BuildInfo }) {
-  const [networkRevision, setNetworkRevision] = useState(0);
   const [params, setParams] = useSearchParams();
   const [busy, setBusy] = useState(false);
-  const tabs = [{ id: "general", label: "General" }, { id: "todo", label: "To Do" }, { id: "calendar", label: "Calendar" }, { id: "about", label: "About" }];
-  const tab = tabs.some(value => value.id === params.get("tab")) ? params.get("tab")! : "general";
+  const tabs = [{ id: "general", label: "General" }, { id: "microsoft", label: "Microsoft" }, { id: "todo", label: "To Do" }, { id: "calendar", label: "Calendar" }, { id: "about", label: "About" }];
+  const tab = tabs.some(value => value.id === params.get("tab")) ? params.get("tab")! : params.has("connection") ? "microsoft" : "general";
   const sections = [{ id: "general", label: "General" },
     tab === "calendar" ? { id: "feeds", label: "Feeds" } : { id: "groupings", label: "Groupings" }];
   const requestedSection = params.get("section");
@@ -262,10 +177,8 @@ function Settings({ build }: { build: BuildInfo }) {
       {tabs.map(value => <button key={value.id} type="button" disabled={busy} aria-pressed={tab === value.id} onClick={() => selectTab(value.id)}
         className={`flex-1 whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-all ${tab === value.id ? "bg-background-container text-on-surface shadow-sm" : "text-on-surface-variant hover:text-on-surface"}`}>{value.label}</button>)}
     </nav>
-    {tab === "general" && <div className="space-y-5">
-      <NetworkSettings onSaved={() => setNetworkRevision(value => value + 1)} />
-      <MicrosoftSettings key={networkRevision} />
-    </div>}
+    {tab === "general" && <NetworkSettings />}
+    {tab === "microsoft" && <MicrosoftSettings />}
     {(tab === "todo" || tab === "calendar") && <nav aria-label={tab === "todo" ? "To Do Settings Sections" : "Calendar Settings Sections"} className="mb-6 flex w-fit max-w-full gap-1 rounded-xl bg-background-container-high p-1">
       {sections.map(value => <button key={value.id} type="button" disabled={busy} aria-pressed={section === value.id}
         onClick={() => { if (!busy) setParams({ tab, section: value.id }); }}
@@ -1021,7 +934,7 @@ function AvailableLists() {
         </Link>
       </li>)}
     </ul> : directory && (
-      !directory.connected ? <Link to="/settings">Connect Microsoft in Settings</Link>
+      !directory.connected ? <Link to="/settings?tab=microsoft">Connect Microsoft in Settings</Link>
       : directory.directoryReady ? <p>All available lists are enrolled.</p>
       : <p>Waiting for the first Microsoft list sync.</p>
     )}
@@ -1067,7 +980,7 @@ function ToDo() {
   useEffect(() => { void refresh(); }, []);
   if (!lists) return <Page>
     <PageHeader title="To Do" />
-    {error ? <><ErrorBanner message={error} /><Link to="/settings">Open Microsoft connection settings</Link></> : <PageLoading label="Loading Microsoft To Do lists…" />}
+    {error ? <><ErrorBanner message={error} /><Link to="/settings?tab=microsoft">Open Microsoft connection settings</Link></> : <PageLoading label="Loading Microsoft To Do lists…" />}
   </Page>;
   const enrolled = lists.filter(list => list.enrolled);
   return <>
@@ -1113,9 +1026,18 @@ export default function App() {
   if (!session) return <PageLoading label="Loading GraphRelay…" />;
   if (!session.configured) return <Login firstRun onLogin={refresh} />;
   if (!session.signedIn) return <Login onLogin={refresh} />;
-  return <Layout build={session.build} user={{ username: "Administrator", displayName: "Administrator" }} onLogout={logout}>
+  return <Layout build={session.build} user={{ username: session.username, displayName: session.username }} onLogout={logout}>
     <Routes>
       <Route path="/dashboard" element={<Dashboard />} />
+      <Route path="/setup/microsoft" element={<Page className="space-y-4">
+        <PageHeader title="Set Up GraphRelay" />
+        <SectionCard title="Connect Microsoft" description="Your local admin account is ready. Connect a Microsoft account to use To Do and Calendar.">
+          <div className="flex flex-wrap gap-2">
+            <Link replace to="/settings?tab=microsoft" className={primaryButtonClass}>Set Up Microsoft</Link>
+            <Link replace to="/dashboard" state={{ microsoftSetupDeferred: true }} className={secondaryButtonClass}>Later</Link>
+          </div>
+        </SectionCard>
+      </Page>} />
       <Route path="/todo/*" element={<ToDo />} />
       <Route path="/calendar" element={<CalendarFeeds />} />
       <Route path="/settings" element={<Settings build={session.build} />} />
