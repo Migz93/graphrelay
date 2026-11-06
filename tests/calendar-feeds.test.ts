@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import Database from "better-sqlite3";
-import { createCalendarFeeds, renderCalendarFeed } from "../src/server/calendar-feeds.js";
+import { createCalendarFeeds, isCalendarGraphRead, renderCalendarFeed } from "../src/server/calendar-feeds.js";
 
 test("calendar feeds preserve all-day dates, stable event IDs and escaped text", () => {
   const allDay = {
@@ -53,4 +53,15 @@ test("legacy calendar feeds keep their subscription token and cached calendar on
   } finally {
     db.close();
   }
+});
+
+test("calendar pagination accepts Microsoft's OData key URLs for reads only", () => {
+  const direct = new URL("https://graph.microsoft.com/v1.0/me/calendars('calendar%3D')/calendarView?$skiptoken=next");
+  const grouped = new URL("https://graph.microsoft.com/v1.0/me/calendarGroups(%27group%27)/calendars('calendar')/calendarView?$skiptoken=next");
+  assert.ok(isCalendarGraphRead(direct, "GET"));
+  assert.ok(isCalendarGraphRead(grouped, "GET"));
+  assert.ok(isCalendarGraphRead(new URL("https://graph.microsoft.com/v1.0/me/calendars/calendar/calendarView"), "GET"));
+  assert.equal(isCalendarGraphRead(direct, "DELETE"), false);
+  assert.equal(isCalendarGraphRead(new URL(direct.pathname, "https://graph.microsoft.com.example.com"), "GET"), false);
+  assert.equal(isCalendarGraphRead(new URL("/v1.0/me/messages('id')", direct), "GET"), false);
 });

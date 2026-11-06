@@ -78,6 +78,12 @@ export function renderCalendarFeed(name: string, events: CalendarEvent[]) {
   return calendar.toString();
 }
 
+export function isCalendarGraphRead(url: URL, method: string) {
+  // Graph pagination can address calendars using OData keys: calendars('id').
+  return method === "GET" && url.origin === "https://graph.microsoft.com"
+    && /^\/v1\.0\/me\/(?:calendars|calendarGroups)(?:\((?:'|%27)[^/]+(?:'|%27)\))?(?:\/|$)/.test(url.pathname);
+}
+
 function calendarPath(id: string, groupId?: string | null) {
   const parent = groupId ? "me/calendarGroups/" + encodeURIComponent(groupId) + "/calendars/" : "me/calendars/";
   return parent + encodeURIComponent(id);
@@ -184,9 +190,14 @@ export function createCalendarFeeds(db: Database.Database, options: {
       if (options.account() !== feed.account) return;
       db.prepare("UPDATE calendar_feeds SET ics = ?, synced_at = ?, error = NULL WHERE token = ? AND revision = ?")
         .run(renderCalendarFeed(feed.name, events), new Date().toISOString(), feed.token, feed.revision);
-    } catch {
+    } catch (error) {
+      const message = error instanceof Error && /^Microsoft Graph returned [45][0-9]{2}\.$/.test(error.message)
+        ? "Feed refresh failed. " + error.message
+        : error instanceof Error && error.message === "Invalid Graph URL."
+          ? "Feed refresh failed. Microsoft returned a calendar link GraphRelay could not follow."
+          : "Feed refresh failed. Try refreshing again.";
       db.prepare("UPDATE calendar_feeds SET error = ? WHERE token = ? AND revision = ?")
-        .run("Feed refresh failed. Try refreshing again.", feed.token, feed.revision);
+        .run(message, feed.token, feed.revision);
     } finally {
       refreshingFeeds.delete(feed.token);
       if (feedById.get(feed.id, feed.account)) feedAttempts.set(feed.token, { at: Date.now(), revision: feed.revision });

@@ -8,7 +8,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync, 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { createCalendarFeeds } from "./calendar-feeds.js";
+import { createCalendarFeeds, isCalendarGraphRead } from "./calendar-feeds.js";
 import { groceryItems } from "./groceries.js";
 import { GroupingStore, type Profile } from "./grouping-store.js";
 import { duplicateGroups } from "./duplicates.js";
@@ -144,7 +144,7 @@ function accessToken(scope: string) {
 async function graph<T = void>(path: string, body?: object, method = body ? "PATCH" : "GET"): Promise<T> {
   const url = new URL(path, "https://graph.microsoft.com/v1.0/");
   const todo = url.pathname.startsWith("/v1.0/me/todo/");
-  const calendar = method === "GET" && /^\/v1\.0\/me\/(calendars|calendarGroups)(?:\/|$)/.test(url.pathname);
+  const calendar = isCalendarGraphRead(url, method);
   if (url.origin !== "https://graph.microsoft.com" || (!todo && !calendar)) throw new Error("Invalid Graph URL.");
   const request = async () => fetch(url, {
     method,
