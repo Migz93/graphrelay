@@ -21,11 +21,13 @@ concurrency:
 
 jobs:
   analyze:
+    if: github.event.repository.private == false || vars.GRAPHRELAY_CODE_SCANNING == 'true'
     name: Analyze
     runs-on: ubuntu-latest
     permissions:
       contents: read
       security-events: write
+      actions: read
     strategy:
       fail-fast: false
       matrix:

@@ -3,3 +3,11 @@
 node_modules
 dist
 config
+
+# Private and repository-only files
+LOCAL.md
+.devcontainer
+.github
+docs
+.DS_Store
+._*

@@ -24,6 +24,7 @@ reviews:
     auto_incremental_review: true
     drafts: false
     base_branches:
+      - "main"
       - "develop"
     auto_pause_after_reviewed_commits: 0
 
@@ -33,8 +34,8 @@ reviews:
   path_instructions:
     - path: "src/server/**"
       instructions: "This is a Node.js/Express backend. Focus on auth bypasses, credential handling, async error handling, missing awaits, and unhandled promise rejections."
-    - path: "src/server/sync/**"
-      instructions: "This code talks to third-party services. Check for token leaks, unsafe retries, partial writes, and poor error isolation."
+    - path: "src/server/calendar-*.ts"
+      instructions: "Check Graph pagination and account isolation, stale feed writes, time zones, and exposure of subscription URLs."
     - path: "docs/**"
       instructions: "Check that technical docs match the implementation and deployment guidance."
 

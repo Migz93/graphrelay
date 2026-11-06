@@ -4,7 +4,7 @@
 
 GraphRelay uses Node.js 22 and runs as UID 1000 in the production image. The default internal port is `9304`, and `GET /api/health` checks process readiness. It does not exercise the Microsoft connection.
 
-A push to `develop` builds `ghcr.io/migz93/graphrelay:develop`. A `v*` tag builds the matching version and `latest`. Pin a published version or an image digest when you want reproducible upgrades. You can also build from the current checkout.
+A push to `develop` publishes `ghcr.io/migz93/graphrelay:develop` and a short commit tag. A `v*` tag publishes the matching version, and a stable tag also updates `latest`. Both workflows build AMD64 and ARM64 images. Pin a published version or an image digest when you want reproducible upgrades. You can also build from the current checkout.
 
 ## Running It
 
@@ -35,6 +35,10 @@ Open `http://localhost:9304` on the Docker host, or reach that address through a
 
 Back up the full volume and retain its encryption key or the same `APP_SECRET`. See [Maintenance](maintenance.md) for backup and restore. Do not mount the live data directory into a disposable test container.
 
+## Container User
+
+The production image runs directly as `node`. Create new bind mounts with ownership and permissions that let UID 1000 write to them. Use a writable Docker-managed named volume or UID 1000 tmpfs for a disposable instance.
+
 ## Runtime Config
 
 | Setting | Default | Purpose |
@@ -45,6 +49,8 @@ Back up the full volume and retain its encryption key or the same `APP_SECRET`. 
 | `TRUST_PROXY` | `0` | Set to `1` for one trusted proxy hop |
 | `APP_SECRET` | Generated key on disk | Optional stable key source. Keep an existing value unchanged when replacing the container. |
 | `ADMIN_PASSWORD`, `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET` | Unset | Legacy environment-based setup, used together with `APP_SECRET`. New installs use the web UI. |
+
+## Reverse Proxy
 
 Saved **Public URL** and **Trust Proxy** settings override the environment defaults immediately. Public URL in the UI accepts an HTTPS origin or HTTP localhost. For a reverse proxy, set the browser-facing origin and enable trust only for one trusted hop. Configure that proxy to overwrite forwarded headers and send `X-Forwarded-Proto: https`. Register the callback displayed in **Settings → Microsoft**. [Microsoft setup](microsoft.md)
 

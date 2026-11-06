@@ -1,12 +1,14 @@
+<!-- shared: structure — adapted from the Migz93 self-hosted app guides -->
+
 # Testing
 
 ## Docker Pull Request Checks
 
-[CI](.github/workflows/ci.yml) runs on PRs and pushes to `develop` and `main`. It installs dependencies, checks TypeScript, runs the test suite, builds the app and starts a production Docker image with disposable `/config` storage. It checks `/api/health` inside the container.
+[CI](.github/workflows/ci.yml) runs type checks, tests and the production build. Pushes to `main` or `develop` also build and start an AMD64 image. PRs and manual runs additionally compile the ARM64 image. Docker checks use disposable data and publish no image. The startup check verifies HTTP health, SQLite and config write access under the non-root runtime user.
 
 ## Commands
 
-Run these as the development user inside the GraphRelay devcontainer or in a compatible Node.js 22 environment.
+Run application checks as `node` inside GraphRelay’s devcontainer on the Docker host.
 
 ```bash
 npm ci
@@ -15,51 +17,67 @@ npm test
 npm run build
 ```
 
-For a local run, build the client first and start the development server with a new temporary data directory. Stop the server before deleting that directory.
+For a local development run, build the client first and use a new data directory. Stop the server before removing it.
 
 ```bash
 DATA_DIR="$(mktemp -d)" npm run dev
 ```
 
-## Test Suite
+## Server Tests
 
-The tests use Node’s test runner through `tsx`. They run without a live Microsoft account or an existing GraphRelay server.
+The suite uses Node’s test runner through `tsx`. It runs without a live Microsoft account or a separate GraphRelay server. The duplicate cleanup test starts an isolated app process with a temporary SQLite database and replaces Microsoft calls with [a fixture](tests/fixtures/graph-server.mjs).
+
+## Browser Checks
+
+Run manual browser checks with a clean browser profile or a disposable Playwright context. GraphRelay has no checked-in Playwright suite. Use mock Graph responses or disposable data. Obtain the owner’s authorization before using live data or real integrations.
+
+### Reaching The App From A Devcontainer
+
+Use the disposable container’s bridge address and port when reachable from the test runner. For a browser outside Docker, publish a separate loopback port and reach it through an SSH tunnel if the Docker host is remote. Use a fresh browser context because cookies can be shared across ports on the same hostname. Set a matching Public URL before exercising OAuth.
+
+## Test Suite
 
 | Test file | Coverage |
 |---|---|
-| [ordering.test.ts](tests/ordering.test.ts) | Named and numeric prefixes, shared numeric prefixes, custom order and large lists, title recovery, grocery matching |
-| [profile-matcher.test.ts](tests/profile-matcher.test.ts) | Default aliases, explicit moves, quantities and optional plural rules |
-| [grouping-draft.test.ts](tests/grouping-draft.test.ts) | Editor state, built-in matches, fallback group and moving plural matches |
-| [grouping-store.test.ts](tests/grouping-store.test.ts) | JSON round trips, filenames, stable IDs and profile portability |
-| [duplicates.test.ts](tests/duplicates.test.ts) | Duplicate keys and which copy is kept |
-| [duplicate-cleanup.test.ts](tests/duplicate-cleanup.test.ts) | HTTP cleanup, request size limits, protected copies, progress recovery and final totals |
-| [calendar-feeds.test.ts](tests/calendar-feeds.test.ts) | iCalendar formatting, old feed migration and Graph calendar pagination paths |
-
-The duplicate cleanup integration test starts a temporary server and SQLite database. Its [Graph fixture](tests/fixtures/graph-server.mjs) replaces Microsoft network calls with controlled responses.
+| [ordering.test.ts](tests/ordering.test.ts) | Shared numeric and named prefixes, custom order, title recovery and grocery matching |
+| [profile-matcher.test.ts](tests/profile-matcher.test.ts) | Default aliases, explicit matches, quantities and plural rules |
+| [grouping-draft.test.ts](tests/grouping-draft.test.ts) | Editor state, fallback group and moving plural matches |
+| [grouping-store.test.ts](tests/grouping-store.test.ts) | JSON round trips, profile portability, stable IDs and filenames |
+| [duplicates.test.ts](tests/duplicates.test.ts) | Duplicate keys and keeper selection |
+| [duplicate-cleanup.test.ts](tests/duplicate-cleanup.test.ts) | HTTP cleanup, request sizes, protected copies, progress recovery and totals |
+| [calendar-feeds.test.ts](tests/calendar-feeds.test.ts) | iCalendar serialization, feed migration and Graph pagination paths |
 
 ## Adding New Tests
 
-Use small fixtures for matching, serialization and schema changes. Test request boundaries and partial failures where mutations could silently do the wrong thing. Cover user-visible changes with a browser check on a disposable instance. Update this table when automated coverage changes.
+Use small fixtures for matching, serialization and schema changes. Test destructive actions for partial failures and stale input. Cover visible changes with an isolated browser check. Update the coverage table when a test is added.
 
 ## Manual Smoke Test
 
-1. Build a uniquely tagged production image on the Docker host. Record the commit and image ID.
-2. Start a uniquely named candidate with disposable, writable `/config` storage. Keep it separate from the running service.
-3. Verify HTTP and Docker health. For a browser check, use a port or bridge address reachable from the devcontainer and use mock Graph responses or a disposable account and data. There is no checked-in Playwright suite.
-4. Exercise the changed path, including errors and relevant persistence. For UI changes, check desktop and mobile. Remove the disposable container and its temporary data when finished.
+1. Run the development checks. On the Docker host, record the commit, build tag and exact smoke container name in the ignored local runbook. Verify the build context and exclude private files.
+2. Build a uniquely tagged production image and record its ID. Start that exact image with fresh writable `/config` storage and no live integration credentials.
+3. Wait for Docker health, check HTTP and verify that the app runs as `node`. Exercise the changed path, including errors and relevant persistence. Use [mobile review](docs/mobile-review.md) for layout changes.
 
-Example candidate startup and health check:
+Example startup and HTTP check:
 
 ```bash
-graphrelay_revision="$(git rev-parse HEAD)"
-graphrelay_candidate="graphrelay:smoke-${graphrelay_revision}"
-docker build --build-arg COMMIT_SHA="$graphrelay_revision" -t "$graphrelay_candidate" .
-docker run -d --name graphrelay-smoke --tmpfs /config:uid=1000,gid=1000 "$graphrelay_candidate"
-docker inspect --format '{{.State.Health.Status}}' graphrelay-smoke
+revision="$(git rev-parse HEAD)"
+candidate="graphrelay:smoke-${revision}"
+smoke="zdev-graphrelay-smoke-$(git rev-parse --short HEAD)"
+docker build --build-arg COMMIT_SHA="$revision" -t "$candidate" .
+image="$(docker image inspect "$candidate" --format '{{.Id}}')"
+docker run -d --name "$smoke" --tmpfs /config:uid=1000,gid=1000 "$image"
+docker inspect --format '{{.State.Health.Status}}' "$smoke"
+docker exec "$smoke" node -e 'fetch("http://127.0.0.1:9304/api/health").then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))'
 ```
 
-Wait for `healthy` before relying on the result. Choose a different smoke container name if that name is already in use. Remove the candidate container with `docker rm -f graphrelay-smoke` after checking it.
+Use a unique name if a smoke container with the same name is already in use. Wait for `healthy` before relying on the result.
+
+### Disposable Test Cleanup
+
+Remove the task’s disposable container and any named test volume after validation, including after failure. Close only the tunnel created for that task. Check names, image IDs and concurrent use before removing anything. Keep candidate and rollback images that are still needed.
 
 ### Live Replacement And Verification
 
-For implementation changes to the running app, deploy the exact tested image when authorized. Inspect the existing mount, port bindings, network, environment and restart policy. Verify health and normal access after replacement, and check that existing configuration and sessions are present. Keep private evidence in the deployment runbook. Documentation-only and review-only work does not trigger replacement.
+Before replacing the running app, record the live and candidate image IDs and the settings required to recreate the service. Preserve the config mount, port bindings, network, restart policy and environment overrides. Keep a known rollback image and check data compatibility before using it.
+
+Deploy the exact tested candidate for implementation changes that affect the running app, unless the owner stops at validation. Confirm Docker health, HTTP and relevant configured behaviour. Keep private evidence in the operations runbook. Documentation, review and repository-tooling changes by themselves do not trigger replacement.

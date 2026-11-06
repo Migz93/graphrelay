@@ -1,9 +1,0 @@
-{
-  "name": "GraphRelay",
-  "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
-  "runArgs": ["--name", "zdev-graphrelay"],
-  "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/graphrelay,type=bind",
-  "workspaceFolder": "/workspaces/graphrelay",
-  "remoteUser": "node",
-  "postCreateCommand": "npm ci"
-}

@@ -1,0 +1,32 @@
+{
+  "name": "dev-graphrelay",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
+  "runArgs": [
+    "--mount",
+    "type=volume,destination=/workspaces/graphrelay/node_modules,volume-nocopy"
+  ],
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/graphrelay,type=bind,consistency=cached",
+  "workspaceFolder": "/workspaces/graphrelay",
+  "remoteUser": "node",
+  "updateRemoteUserUID": true,
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  "containerEnv": {
+    "HOME": "/home/node",
+    "NPM_CONFIG_CACHE": "/home/node/.npm"
+  },
+  "postCreateCommand": "sudo chown node:node node_modules && npm ci",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "esbenp.prettier-vscode",
+        "anthropic.claude-code",
+        "openai.chatgpt"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  }
+}

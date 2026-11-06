@@ -4,3 +4,7 @@ dist/
 config/
 .DS_Store
 ._*
+
+# Private checkout and devcontainer settings
+LOCAL.md
+.devcontainer/devcontainer.json

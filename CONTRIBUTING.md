@@ -1,31 +1,45 @@
+<!-- shared: structure — adapted from the Migz93 self-hosted app guides -->
+
 # Contributing
 
 ## Workflow
 
-GraphRelay’s maintainers work directly on `main` during early development. For an external contribution, target `main` if opening a PR. The maintainer will announce when the project switches to `develop` and the sibling apps’ PR workflow. See the [workflow reference](docs/workflow.md).
+GraphRelay’s maintainers work directly on `main` during early development. Target `main` for external contributions. See the [workflow reference](docs/workflow.md) before opening a PR or tagging a release.
 
 ## Pull Requests
 
-Use a semantic title such as `feat:`, `fix:` or `docs:`. Describe the reason for the change, the checks you ran, and anything reviewers should verify about Microsoft integrations, auth, storage, Docker, or migration behaviour.
+- Use semantic PR titles such as `feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, or `ci:`.
+- Explain what changed, why, and what reviewers should verify.
+- Call out release, Docker, authentication, Microsoft integration, or schema impact when relevant.
 
 ## Local Development
 
-Use Node.js 22 and npm. The included [devcontainer configuration](.devcontainer/devcontainer.json) installs dependencies at creation. See [Testing](TESTING.md) for commands and an isolated local run.
+Use Node.js 22 and npm. The [devcontainer example](.devcontainer/devcontainer.json.example) is the starting point for a fresh development checkout.
+
+```bash
+npm ci
+npm run check
+npm test
+npm run build
+```
+
+See [Testing](TESTING.md) for an isolated local run and [Deployment](docs/deployment.md) for Docker.
 
 ## Testing
 
-Test runtime changes with disposable data. The automated suite does not need live Microsoft credentials. [Testing](TESTING.md)
+See [TESTING.md](TESTING.md) for automated tests and disposable browser checks.
 
 ## Technical Docs
 
-Start at the [technical docs index](docs/README.md). Update the relevant reference in the same branch as changes to durable behaviour.
+See [docs/README.md](docs/README.md) for the technical reference area. Update the relevant topic in the same branch or PR as a durable behaviour change.
 
 ## Coding Notes
 
+- Keep changes scoped to the task.
 - Keep Microsoft Graph calls and credentials on the server.
-- Preserve cached reads and handle retries, overlaps and partial writes when changing background jobs.
-- Keep generated output, local settings and private data out of commits.
+- Preserve cached reads and account boundaries. Handle overlapping jobs and partial writes.
+- Keep generated output and local-only files out of commits.
 
 ## Reporting Bugs And Requesting Features
 
-Open an issue with the app version or revision, steps to reproduce, expected behaviour and sanitized evidence. Use the private reporting process for vulnerabilities. [Security Policy](SECURITY.md)
+Open an issue with the app version or revision, reproduction steps, expected behaviour and sanitized evidence. Use private reporting for vulnerabilities. [Security Policy](SECURITY.md)

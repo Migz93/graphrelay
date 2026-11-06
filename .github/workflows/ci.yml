@@ -1,31 +1,151 @@
 name: CI
+
 on:
   pull_request:
-    branches: [develop, main]
+    branches: [main, develop]
+  workflow_dispatch:
   push:
-    branches: [develop, main]
+    branches:
+      - main
+      - develop
+
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  check:
+  build:
+    name: Typecheck and Build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
-      - run: npm run check && npm test && npm run build
-      - run: docker build --build-arg COMMIT_SHA="$GITHUB_SHA" -t graphrelay:ci .
-      - run: |
-          trap 'docker rm -f graphrelay-ci >/dev/null 2>&1 || true' EXIT
-          docker run -d --name graphrelay-ci --tmpfs /config:uid=1000,gid=1000 graphrelay:ci
-          for i in $(seq 1 30); do
-            if docker exec graphrelay-ci node -e 'fetch("http://127.0.0.1:9304/api/health").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))'; then
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript checks
+        run: npm run check
+
+      - name: Tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  docker:
+    name: Docker ${{ matrix.arch == 'amd64' && 'AMD64 build and startup' || 'ARM64 build' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: ${{ fromJSON(github.event_name == 'push' && '["amd64"]' || '["amd64","arm64"]') }}
+    env:
+      APP_NAME: graphrelay
+      APP_PORT: 9304
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up QEMU for ARM64
+        if: matrix.arch == 'arm64'
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@594f3bf4285d9ea8dc53c9a0c9c4092420091003 # v4
+
+      # Load only the native image for startup checks; neither build publishes.
+      - name: Build Docker image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/${{ matrix.arch }}
+          push: false
+          load: ${{ matrix.arch == 'amd64' }}
+          tags: ${{ env.APP_NAME }}:ci
+          build-args: COMMIT_SHA=${{ github.sha }}
+          cache-from: |
+            type=gha,scope=pr-docker-${{ matrix.arch }}
+            type=gha
+          cache-to: type=gha,mode=max,scope=pr-docker-${{ matrix.arch }}
+
+      - name: Start AMD64 container with fresh data
+        if: matrix.arch == 'amd64'
+        run: |
+          docker run --detach \
+            --name "$APP_NAME" \
+            --network bridge \
+            --publish "127.0.0.1:$APP_PORT:$APP_PORT" \
+            --tmpfs /config:uid=1000,gid=1000,mode=0700 \
+            "$APP_NAME:ci"
+
+      - name: Wait for AMD64 container health
+        if: matrix.arch == 'amd64'
+        timeout-minutes: 3
+        run: |
+          for attempt in {1..40}; do
+            state="$(docker inspect --format '{{.State.Status}}' "$APP_NAME")"
+            health="$(docker inspect --format '{{.State.Health.Status}}' "$APP_NAME")"
+            if [ "$state" != running ] || [ "$health" = unhealthy ]; then
+              echo "Container failed: state=$state health=$health" >&2
+              exit 1
+            fi
+            if [ "$health" = healthy ]; then
               exit 0
             fi
-            sleep 1
+            echo "Waiting for container health (attempt $attempt/40): $health"
+            sleep 3
           done
-          docker logs graphrelay-ci
+          echo "Container did not become healthy within 120 seconds" >&2
           exit 1
+
+      - name: Check AMD64 HTTP, SQLite, and runtime permissions
+        if: matrix.arch == 'amd64'
+        run: |
+          curl --fail --silent --show-error --max-time 10 --write-out '\n' "http://127.0.0.1:$APP_PORT/api/health"
+          docker exec --interactive --user node "$APP_NAME" node <<'NODE'
+          const assert = require('node:assert/strict');
+          const fs = require('node:fs');
+          const Database = require('better-sqlite3');
+          const status = fs.readFileSync('/proc/1/status', 'utf8');
+          const effectiveUid = Number(status.match(/^Uid:\s+\d+\s+(\d+)/m)?.[1]);
+          assert.equal(effectiveUid, process.getuid(), 'App must run as the node user');
+          assert.notEqual(effectiveUid, 0, 'App must not run as root');
+          fs.writeFileSync('/config/.ci-write-check', 'ok');
+          fs.unlinkSync('/config/.ci-write-check');
+          const db = new Database(':memory:');
+          assert.equal(db.prepare('SELECT 1 AS value').get().value, 1);
+          db.close();
+          NODE
+
+      - name: Show AMD64 container diagnostics on failure
+        if: failure() && matrix.arch == 'amd64'
+        run: |
+          if docker container inspect "$APP_NAME" > /dev/null 2>&1; then
+            docker logs "$APP_NAME"
+            docker inspect "$APP_NAME"
+          fi
+
+      - name: Remove AMD64 container
+        if: always() && matrix.arch == 'amd64'
+        run: |
+          if docker container inspect "$APP_NAME" > /dev/null 2>&1; then
+            docker rm --force "$APP_NAME"
+          fi
