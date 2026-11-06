@@ -7,55 +7,53 @@
 [![Project Maintainer][maintainer-shield]][user-profile]
 [![Buy me a coffee][coffee-shield]][coffee]
 
-GraphRelay is a self-hosted companion for Microsoft To Do and Outlook Calendar. It organizes shared lists, removes duplicate tasks, and publishes calendar subscriptions from one local web UI.
+GraphRelay helps you organize Microsoft To Do lists and share Outlook calendars from an app you run yourself. Group a shared shopping list by aisle, clean up duplicate tasks, or follow several Outlook calendars through one subscription link.
 
 ## What GraphRelay Does
 
-- Organizes selected Microsoft To Do lists with shared grouping profiles and sortable title prefixes.
-- Previews and removes duplicate tasks on demand. Enrolled lists can also clean up duplicates automatically.
-- Shows Outlook events in a calendar view and combines selected calendars into iCalendar feeds.
-- Shows cached list and calendar data alongside sync status and connection alerts.
+- **Microsoft To Do**. Put things that belong together next to each other, such as produce, frozen food and pantry items. Choose which lists GraphRelay manages.
+- **Outlook Calendar**. See events from several calendars in one view, or combine them into a single link you can add to another calendar app.
 
 ## Preview
 
 ### Dashboard
 
-Upcoming events, enrolled lists, and Microsoft connection status at a glance.
+See what’s coming up, what’s left on the lists you manage, and whether anything needs attention.
 
 ![GraphRelay dashboard with sample events and lists](./docs/assets/dashboard.png)
 
 ### To Do
 
-Open and completed items using their Microsoft titles, with optional group headings and per-list settings.
+See your list as it appears in Microsoft To Do, or turn on group headings to browse it by aisle.
 
 ![A sample GraphRelay shopping list](./docs/assets/todo.png)
 
 ### Calendar
 
-Choose visible calendars and browse their events or manage subscription feeds.
+Tick the calendars you want to see together, or switch to **Feeds** to manage your subscription links.
 
 ![GraphRelay calendar with sample events](./docs/assets/calendar.png)
 
 ## Key Features
 
-- Local admin sign-in and password management.
-- Guided Microsoft connection through your own Entra app registration.
-- Built-in grocery grouping, portable JSON profiles, numeric or named prefixes, and optional title capitalization.
-- Manual and scheduled list sync, duplicate review, and per-list activity.
-- Multi-calendar feeds with independent refresh and date range overrides.
-- HTTPS reverse proxy support through **Settings → General → Network**.
+- Start with the built-in grocery groups or make your own. Choose named labels like `03 Frozen` or number-only labels like `03`.
+- Preview duplicate tasks and see which copy will be kept before removing anything. You can also turn on automatic cleanup for selected lists.
+- Choose how often GraphRelay checks each list, or select **Sync Now** to update it immediately.
+- Decide which calendars go into each subscription, how often GraphRelay refreshes it, and how far back and ahead it includes events.
 
 ## How It Works
 
-GraphRelay reads Microsoft Graph in the background and stores snapshots in SQLite. The web UI reads the local data. Lists are cached on a schedule, and configured actions run for enrolled lists. Calendar feeds serve the last available snapshot for their current sources and date range.
+**For a shared shopping list**, pick the list in GraphRelay and turn on grouping. Everyone can keep adding and checking off items in Microsoft To Do as usual. GraphRelay checks the list in the background and adds labels so things like peas and ice cream sit together when the list is sorted alphabetically. If an item lands in the wrong aisle, change its group in GraphRelay and GraphRelay remembers that choice for lists using the same grouping profile.
+
+**For calendars**, choose the Outlook calendars you want in a feed and copy its subscription link into your calendar app. For example, you can combine your personal and family calendars into one subscription. GraphRelay keeps the feed up to date as events change in Outlook.
 
 ## Quick Start
 
 ### Requirements
 
-- Docker with a writable `/config` volume.
+- A computer or server running Docker.
 - A Microsoft account with access to the lists and calendars you want to use.
-- A Microsoft Entra app registration and a browser-reachable callback address.
+- A Microsoft Entra app registration. GraphRelay walks you through creating it during setup.
 
 ### Docker
 
@@ -76,7 +74,7 @@ Open `http://localhost:9304` on the Docker host or use an SSH tunnel from your b
 
 ### Docker Compose
 
-The checked-in [Compose file](docker-compose.yml) uses the GHCR `develop` image. If you are building locally or the package is unavailable to you, set the service image to your local build tag before starting it.
+The [Compose file](docker-compose.yml) uses the development image from GitHub. If you built the image yourself using the command above, set the service image to `graphrelay:local`.
 
 ```bash
 sudo install -d -m 0700 -o 1000 -g 1000 /opt/graphrelay
@@ -85,26 +83,24 @@ docker compose up -d
 
 ### Configuration
 
-- **Port**. Change the host side of the port binding if needed. Use the corresponding browser origin for Microsoft sign-in.
-- **Data directory**. Keep the database, encryption key, and grouping profiles together in the `/config` mount.
-- **Reverse proxy**. Set the HTTPS Public URL in **Settings → General → Network** and enable Trust Proxy for one trusted proxy hop. Copy the callback from **Settings → Microsoft**. [Deployment](docs/deployment.md)
+Keep the `/config` volume when you update GraphRelay so it retains your account setup, lists and feeds. See [Deployment](docs/deployment.md) for changing the port, storage location or browser address.
 
 ### First Setup
 
 1. Create a local admin username and password.
 2. Choose **Set Up Microsoft** to open the checklist, or choose **Later** and return via **Settings → Microsoft**.
-3. Register the Web callback in Entra, save the client ID and client secret value, and connect Microsoft. Approve To Do and Calendar access in the same sign-in. [Microsoft setup](docs/microsoft.md)
-4. Enroll any lists you want to automate from **To Do**. Open **Calendar → Feeds** to create iCalendar subscriptions.
+3. Follow the checklist to register the app in Entra and connect your Microsoft account. Microsoft asks for To Do and Calendar access together. [Microsoft setup](docs/microsoft.md)
+4. Open **To Do** and enroll a list to set up grouping or automatic cleanup. Open **Calendar → Feeds** to create a subscription.
 
 ## Important Limitations
 
 ### To Do Sorting
 
-GraphRelay controls grouping through task title prefixes. Set the shared list to **Alphabetical** in Microsoft To Do on each device. [To Do](docs/todo.md)
+For groups to appear together in Microsoft To Do, set the list to **Alphabetical** on each device. [To Do](docs/todo.md)
 
 ### Calendar Subscriptions
 
-A feed link grants read access to anyone who has the link and can reach GraphRelay. Subscriber apps control how often they check for updates. [Calendar](docs/calendar.md)
+Anyone who has the subscription link and can reach GraphRelay can read the events in that feed. Your calendar app decides how often it checks the link for updates. [Calendar](docs/calendar.md)
 
 ### Early Development
 
@@ -120,7 +116,7 @@ GraphRelay was developed with Codex assistance and hands-on direction from its m
 
 ## Credits And Inspiration
 
-The calendar subscription workflow builds on the ideas in [ms-ical](https://github.com/Migz93/ms-ical). GraphRelay shares design and development conventions with [Hubarr](https://github.com/Migz93/hubarr), [ShelfBridge](https://github.com/Migz93/shelfbridge), and [Pacearr](https://github.com/Migz93/pacearr).
+GraphRelay shares design and development conventions with [Hubarr](https://github.com/Migz93/hubarr), [ShelfBridge](https://github.com/Migz93/shelfbridge), and [Pacearr](https://github.com/Migz93/pacearr).
 
 [coffee]: https://www.buymeacoffee.com/Migz93
 [coffee-shield]: https://img.shields.io/badge/buy%20me%20a%20coffee-donate-yellow.svg?style=for-the-badge

@@ -24,10 +24,6 @@ Refresh options are 15, 30, 60, 120, 180 and 360 minutes. Date ranges accept who
 
 ## Feed Availability
 
-A subscription URL is a bearer link. Anyone who has it and can reach GraphRelay can read its events without a GraphRelay sign-in. Revoking the link removes the feed. Create a new feed if you need a replacement link.
+Anyone who has the subscription link and can reach GraphRelay can read its events without signing in. Revoking the link removes the feed. Create a new feed if you need a replacement link.
 
 A refresh error preserves the last successful feed for its current sources and date range. Changing the sources or date range clears the old content while the replacement is built. A feed waiting for its first valid snapshot returns HTTP 503 with `Retry-After`. A revoked or unknown link returns 404.
-
-## Moving From ms-ical
-
-Existing ms-ical subscriptions and settings stay with that app. Create equivalent feeds in GraphRelay, then update each subscriber with its new link.
