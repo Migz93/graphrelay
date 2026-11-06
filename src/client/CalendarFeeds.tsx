@@ -4,6 +4,7 @@ import { ErrorBanner, Page, PageHeader, PageLoading } from "./components/Page";
 import { SectionCard, SelectInput, TextInput, compactSecondaryButtonClass, dangerButtonClass, primaryButtonClass, secondaryButtonClass } from "./components/FormControls";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { api } from "./lib/api";
+import { cn } from "./lib/utils";
 
 const CalendarView = lazy(() => import("./CalendarView"));
 
@@ -95,8 +96,8 @@ export function CalendarSettings({ section }: { section: "general" | "feeds" }) 
   </SectionCard>;
 }
 
-function FeedEditor({ feed, calendars, settings, close, saved }: {
-  feed?: Feed; calendars: Calendar[]; settings: Defaults; close: () => void; saved: () => Promise<void>;
+function FeedEditor({ feed, selectUrl, calendars, settings, close, saved }: {
+  feed?: Feed; selectUrl?: boolean; calendars: Calendar[]; settings: Defaults; close: () => void; saved: () => Promise<void>;
 }) {
   const [name, setName] = useState(feed?.name ?? "");
   const [selected, setSelected] = useState(feed?.sources.map(source => source.id) ?? []);
@@ -105,6 +106,28 @@ function FeedEditor({ feed, calendars, settings, close, saved }: {
   const [future, setFuture] = useState(String(feed?.futureDays ?? ""));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [confirmRevoke, setConfirmRevoke] = useState(false);
+  const link = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (selectUrl) {
+      link.current?.focus();
+      link.current?.select();
+    }
+  }, [selectUrl]);
+  async function revoke() {
+    if (!feed) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api("/calendar-feeds/" + feed.id, "DELETE");
+      close();
+      await saved();
+    } catch (error) {
+      setError((error as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
   const known = new Set(calendars.map(calendar => calendar.id));
   const choices = [...calendars, ...(feed?.sources.filter(source => !known.has(source.id)) ?? [])];
   async function save(event: FormEvent) {
@@ -125,8 +148,8 @@ function FeedEditor({ feed, calendars, settings, close, saved }: {
     }
   }
   return <SettingsDialog title={feed ? "Feed Settings" : "Create Calendar Feed"} tabs={[]} selected="" select={() => undefined} close={() => { if (!busy) close(); }}>
+    {error && <ErrorBanner message={error} />}
     <form className="grid gap-4" onSubmit={save}>
-      {error && <ErrorBanner message={error} />}
       <label className="grid gap-2 text-sm">Feed Name
         <TextInput value={name} onChange={setName} required maxLength={100} />
       </label>
@@ -150,26 +173,41 @@ function FeedEditor({ feed, calendars, settings, close, saved }: {
         <button type="button" className={secondaryButtonClass} disabled={busy} onClick={close}>Cancel</button>
       </div>
     </form>
+    {feed && <section className="mt-5 grid min-w-0 gap-3 border-t border-outline-variant/30 pt-4">
+      <label className="grid min-w-0 gap-1 text-sm">Subscription URL
+        <input ref={link} className="w-full min-w-0 rounded-lg border border-outline-variant/30 bg-background px-3 py-2 text-on-surface"
+          readOnly value={feedUrl(feed)} onFocus={event => event.currentTarget.select()} />
+      </label>
+      {selectUrl && <p className="text-xs text-on-surface-variant">Copy the selected URL to subscribe.</p>}
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className={dangerButtonClass} disabled={busy} onClick={() => confirmRevoke ? void revoke() : setConfirmRevoke(true)}>
+          {confirmRevoke ? "Confirm Revoke Link" : "Revoke Link"}
+        </button>
+        {confirmRevoke && <button type="button" className={secondaryButtonClass} disabled={busy} onClick={() => setConfirmRevoke(false)}>Keep Link</button>}
+      </div>
+    </section>}
   </SettingsDialog>;
 }
 
-function FeedLink({ feed, settings, busy, onEdit, onRemove }: {
-  feed: Feed; settings: Defaults; busy: boolean; onEdit: () => void; onRemove: () => void;
+function feedUrl(feed: Feed) {
+  return new URL(feed.path, window.location.origin).href;
+}
+
+function FeedLink({ feed, settings, busy, onEdit }: {
+  feed: Feed; settings: Defaults; busy: boolean; onEdit: (selectUrl?: boolean) => void;
 }) {
-  const [confirm, setConfirm] = useState(false);
-  const [notice, setNotice] = useState("");
-  const input = useRef<HTMLInputElement>(null);
-  const details = useRef<HTMLDetailsElement>(null);
-  const url = new URL(feed.path, window.location.origin).href;
+  const [copiedAt, setCopiedAt] = useState(0);
+  useEffect(() => {
+    if (!copiedAt) return;
+    const timer = setTimeout(() => setCopiedAt(0), 2500);
+    return () => clearTimeout(timer);
+  }, [copiedAt]);
   async function copy() {
     try {
-      await navigator.clipboard.writeText(url);
-      setNotice("Feed link copied.");
+      await navigator.clipboard.writeText(feedUrl(feed));
+      setCopiedAt(Date.now());
     } catch {
-      if (details.current) details.current.open = true;
-      input.current?.focus();
-      input.current?.select();
-      setNotice("Feed link selected. Copy it to subscribe.");
+      onEdit(true);
     }
   }
   return <article className="grid min-w-0 gap-2 rounded-lg border border-outline-variant/30 px-3 py-2.5 sm:px-4">
@@ -185,26 +223,12 @@ function FeedLink({ feed, settings, busy, onEdit, onRemove }: {
         </p>
       </div>
       <div className="flex flex-wrap gap-2">
-        <button className={compactSecondaryButtonClass} onClick={() => void copy()}>Copy Link</button>
-        <button className={compactSecondaryButtonClass} disabled={busy} onClick={onEdit}>Settings</button>
+        <button className={cn(compactSecondaryButtonClass, "min-w-20", copiedAt !== 0 && "bg-success text-background hover:bg-success")}
+          aria-live="polite" onClick={() => void copy()}>{copiedAt ? "Copied" : "Copy Link"}</button>
+        <button className={compactSecondaryButtonClass} disabled={busy} onClick={() => onEdit()}>Settings</button>
       </div>
     </div>
     {feed.error && <ErrorBanner className="!mb-0 py-2 text-sm" message={feed.error} />}
-    <details ref={details} className="min-w-0 text-xs">
-      <summary className="w-fit cursor-pointer text-on-surface-variant hover:text-on-surface">Link Details</summary>
-      <div className="mt-2 grid gap-2">
-        <label className="grid min-w-0 gap-1">Subscription URL
-          <input ref={input} className="w-full min-w-0 rounded-lg border border-outline-variant/30 bg-background px-3 py-2 text-on-surface" readOnly value={url} onFocus={event => event.currentTarget.select()} />
-        </label>
-        <div className="flex flex-wrap gap-2">
-          <button className={dangerButtonClass} disabled={busy} onClick={() => confirm ? onRemove() : setConfirm(true)}>
-            {confirm ? "Confirm Revoke Link" : "Revoke Link"}
-          </button>
-          {confirm && <button className={secondaryButtonClass} disabled={busy} onClick={() => setConfirm(false)}>Cancel</button>}
-        </div>
-      </div>
-    </details>
-    {notice && <p role="status" className="text-xs text-on-surface-variant">{notice}</p>}
   </article>;
 }
 
@@ -214,7 +238,7 @@ export default function CalendarFeeds() {
   const [status, setStatus] = useState<CalendarStatus>();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [editor, setEditor] = useState<Feed | "new">();
+  const [editor, setEditor] = useState<{ feed?: Feed; selectUrl?: boolean }>();
   useEffect(() => {
     let active = true;
     const load = () => api<CalendarStatus>("/calendar-feeds").then(value => {
@@ -249,7 +273,7 @@ export default function CalendarFeeds() {
   return <Page className="space-y-5">
     <PageHeader title="Calendar">
       {status?.connected && <>
-        {feedsTab && <button className={primaryButtonClass} disabled={busy || !status.calendars.length} onClick={() => setEditor("new")}>Create Feed</button>}
+        {feedsTab && <button className={primaryButtonClass} disabled={busy || !status.calendars.length} onClick={() => setEditor({})}>Create Feed</button>}
         {(feedsTab || !status.calendars.length) && <button className={secondaryButtonClass} disabled={busy || status.refreshing} onClick={() => void change("/refresh", "POST")}>
           {status.refreshing ? "Refreshing…" : "Refresh Calendars"}
         </button>}
@@ -268,10 +292,10 @@ export default function CalendarFeeds() {
       {!feedsTab && <Suspense fallback={<PageLoading label="Loading Calendar…" />}><CalendarView calendars={status.calendars} /></Suspense>}
       {feedsTab && <SectionCard title="Subscription Feeds" description="Create a subscription link for one or more calendars. Anyone who has the link can read its events.">
         {status.feeds.length ? status.feeds.map(feed => <FeedLink key={feed.id} feed={feed} settings={status.settings} busy={busy}
-          onEdit={() => setEditor(feed)} onRemove={() => void change("/" + feed.id, "DELETE")} />)
+          onEdit={selectUrl => setEditor({ feed, selectUrl })} />)
           : <p>{status.refreshing && !status.calendars.length ? "Discovering calendars…" : "No subscription feeds yet."}</p>}
       </SectionCard>}
-      {feedsTab && editor && <FeedEditor feed={editor === "new" ? undefined : editor} calendars={status.calendars} settings={status.settings}
+      {feedsTab && editor && <FeedEditor feed={editor.feed} selectUrl={editor.selectUrl} calendars={status.calendars} settings={status.settings}
         close={() => setEditor(undefined)} saved={load} />}
     </>}
   </Page>;

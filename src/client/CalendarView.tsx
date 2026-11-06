@@ -99,10 +99,10 @@ export default function CalendarView({ calendars }: { calendars: Calendar[] }) {
     ? { dateStyle: "medium" } as const
     : { dateStyle: "medium", timeStyle: "short" } as const;
 
-  return <div className="grid min-w-0 gap-4 lg:grid-cols-[12rem_minmax(0,1fr)]">
+  return <div className="grid min-w-0 gap-4">
     <fieldset className="min-w-0 self-start rounded-xl border border-outline-variant/30 bg-background-container p-3">
       <legend className="px-1 text-sm font-semibold">Visible Calendars</legend>
-      <div className="flex max-h-48 flex-wrap gap-x-4 gap-y-2 overflow-y-auto lg:grid">
+      <div className="flex max-h-32 flex-wrap gap-x-5 gap-y-2 overflow-y-auto">
         {calendars.map(calendar => <label key={calendar.id} className="flex min-w-0 items-center gap-2 text-sm">
           <input type="checkbox" className="accent-primary" checked={!hidden.includes(calendar.id)} onChange={() => toggle(calendar.id)} />
           <span aria-hidden="true" className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: calendarColors.get(calendar.id) }} />
