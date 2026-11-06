@@ -494,6 +494,7 @@ app.get("/api/dashboard", (_req, res) => {
   const enrolled = db.prepare("SELECT id, name FROM lists ORDER BY name COLLATE NOCASE").all() as { id: string; name: string }[];
   res.json({
     connected: !!read("username"),
+    listCount: new Set([...localDirectory(), ...enrolled].map(list => list.id)).size,
     lists: enrolled.map(list => ({
       ...list,
       openItems: readSnapshot(list.id)?.items.length ?? null,

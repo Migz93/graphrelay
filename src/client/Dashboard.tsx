@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ChevronRight } from "lucide-react";
+import { CalendarDays, ChevronRight, ClipboardList, ListChecks, type LucideIcon } from "lucide-react";
 import { ErrorBanner, Page, PageHeader, PageLoading } from "./components/Page";
 import { SectionCard, compactSecondaryButtonClass } from "./components/FormControls";
 import { useCalendarSnapshot } from "./hooks/useCalendarSnapshot";
@@ -9,11 +9,22 @@ import { calendarColorsFor, hiddenCalendars, monthKey, type Calendar } from "./l
 
 type DashboardData = {
   connected: boolean;
+  listCount: number;
   lists: { id: string; name: string; openItems: number | null; error: boolean }[];
   calendar: { connected: boolean; calendars: Calendar[]; error?: string; failedFeeds: { id: number; name: string }[] };
 };
 
 const listPath = (id: string) => "/todo/" + encodeURIComponent(id);
+
+function DashboardStat({ label, value, to, icon: Icon }: { label: string; value: number; to: string; icon: LucideIcon }) {
+  return <Link to={to} className="grid min-w-0 content-center justify-items-center gap-0.5 rounded-xl border border-outline-variant/30 bg-background-container px-2 py-2.5 text-center text-on-surface no-underline hover:bg-background-container-high">
+    <span className="flex items-center gap-1.5">
+      <Icon size={15} aria-hidden="true" />
+      <strong className="font-headline text-lg leading-none">{value}</strong>
+    </span>
+    <span className="text-xs text-on-surface-variant">{label}</span>
+  </Link>;
+}
 
 function UpcomingEvents({ calendar }: { calendar: DashboardData["calendar"] }) {
   const [hidden] = useState(hiddenCalendars);
@@ -98,6 +109,11 @@ export default function Dashboard() {
     <PageHeader title="Dashboard" />
     {error && <ErrorBanner message={error} />}
     {!data && !error && <PageLoading label="Loading Dashboard…" />}
+    {data && <nav aria-label="Dashboard Stats" className="grid grid-cols-3 gap-2 sm:gap-3">
+      <DashboardStat label="Calendars" value={data.calendar.calendars.length} to="/calendar" icon={CalendarDays} />
+      <DashboardStat label="To Do Lists" value={data.listCount} to="/todo" icon={ClipboardList} />
+      <DashboardStat label="Enrolled Lists" value={data.lists.length} to="/todo" icon={ListChecks} />
+    </nav>}
     {!!attention.length && <section className="rounded-xl border border-warning/35 bg-warning/10 px-4 py-3">
       <h2 className="mb-1 text-sm font-semibold text-warning">Needs Attention</h2>
       <ul className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
