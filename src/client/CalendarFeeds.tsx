@@ -106,6 +106,7 @@ function FeedEditor({ feed, selectUrl, calendars, settings, close, saved }: {
   const [future, setFuture] = useState(String(feed?.futureDays ?? ""));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [startingRefresh, setStartingRefresh] = useState(false);
   const [confirmRevoke, setConfirmRevoke] = useState(false);
   const link = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -114,6 +115,19 @@ function FeedEditor({ feed, selectUrl, calendars, settings, close, saved }: {
       link.current?.select();
     }
   }, [selectUrl]);
+  async function refreshNow() {
+    if (!feed) return;
+    setStartingRefresh(true);
+    setError("");
+    try {
+      await api("/calendar-feeds/" + feed.id + "/refresh", "POST");
+      await saved();
+    } catch (error) {
+      setError((error as Error).message);
+    } finally {
+      setStartingRefresh(false);
+    }
+  }
   async function revoke() {
     if (!feed) return;
     setBusy(true);
@@ -179,7 +193,14 @@ function FeedEditor({ feed, selectUrl, calendars, settings, close, saved }: {
           readOnly value={feedUrl(feed)} onFocus={event => event.currentTarget.select()} />
       </label>
       {selectUrl && <p className="text-xs text-on-surface-variant">Copy the selected URL to subscribe.</p>}
+      <p role="status" className="text-xs text-on-surface-variant">
+        {startingRefresh || feed.refreshing ? "Refreshing feed…" : feed.syncedAt ? "Last synced · " + new Date(feed.syncedAt).toLocaleString() : "Waiting for a calendar sync."}
+      </p>
+      {feed.error && !startingRefresh && !feed.refreshing && <ErrorBanner className="!mb-0 py-2 text-sm" message={feed.error} />}
       <div className="flex flex-wrap gap-2">
+        <button type="button" className={secondaryButtonClass} disabled={busy || startingRefresh || feed.refreshing} onClick={() => void refreshNow()}>
+          {startingRefresh || feed.refreshing ? "Refreshing…" : "Refresh Now"}
+        </button>
         <button type="button" className={dangerButtonClass} disabled={busy} onClick={() => confirmRevoke ? void revoke() : setConfirmRevoke(true)}>
           {confirmRevoke ? "Confirm Revoke Link" : "Revoke Link"}
         </button>
@@ -295,7 +316,7 @@ export default function CalendarFeeds() {
           onEdit={selectUrl => setEditor({ feed, selectUrl })} />)
           : <p>{status.refreshing && !status.calendars.length ? "Discovering calendars…" : "No subscription feeds yet."}</p>}
       </SectionCard>}
-      {feedsTab && editor && <FeedEditor feed={editor.feed} selectUrl={editor.selectUrl} calendars={status.calendars} settings={status.settings}
+      {feedsTab && editor && <FeedEditor feed={status.feeds.find(feed => feed.id === editor.feed?.id) ?? editor.feed} selectUrl={editor.selectUrl} calendars={status.calendars} settings={status.settings}
         close={() => setEditor(undefined)} saved={load} />}
     </>}
   </Page>;

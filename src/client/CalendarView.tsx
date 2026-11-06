@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import FullCalendar from "@fullcalendar/react";
 import type { DatesSetArg, EventClickArg } from "@fullcalendar/core";
 import dayGridPlugin from "@fullcalendar/daygrid";
@@ -40,6 +40,7 @@ function monthKey(date: Date) {
 
 export default function CalendarView({ calendars }: { calendars: Calendar[] }) {
   const ref = useRef<FullCalendar>(null);
+  const filtersId = useId();
   const [hidden, setHidden] = useState(hiddenCalendars);
   const [month, setMonth] = useState(() => monthKey(new Date()));
   const [initialView] = useState(() => window.matchMedia("(max-width: 639px)").matches ? "listWeek" : "dayGridMonth");
@@ -100,8 +101,8 @@ export default function CalendarView({ calendars }: { calendars: Calendar[] }) {
     : { dateStyle: "medium", timeStyle: "short" } as const;
 
   return <div className="grid min-w-0 gap-4">
-    <fieldset className="min-w-0 self-start rounded-xl border border-outline-variant/30 bg-background-container p-3">
-      <legend className="px-1 text-sm font-semibold">Visible Calendars</legend>
+    <div role="group" aria-labelledby={filtersId} className="min-w-0 rounded-xl border border-outline-variant/30 bg-background-container p-3">
+      <h2 id={filtersId} className="mb-2 text-sm font-semibold">Visible Calendars</h2>
       <div className="flex max-h-32 flex-wrap gap-x-5 gap-y-2 overflow-y-auto">
         {calendars.map(calendar => <label key={calendar.id} className="flex min-w-0 items-center gap-2 text-sm">
           <input type="checkbox" className="accent-primary" checked={!hidden.includes(calendar.id)} onChange={() => toggle(calendar.id)} />
@@ -110,7 +111,7 @@ export default function CalendarView({ calendars }: { calendars: Calendar[] }) {
         </label>)}
       </div>
       {!calendars.length && <p className="text-sm text-on-surface-variant">No calendars found yet.</p>}
-    </fieldset>
+    </div>
 
     <section aria-label="Calendar Events" className="graphrelay-calendar min-w-0 rounded-xl border border-outline-variant/30 bg-background-container p-3 sm:p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">

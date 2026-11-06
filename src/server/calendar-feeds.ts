@@ -206,6 +206,7 @@ export function createCalendarFeeds(db: Database.Database, options: {
   }
 
   async function refreshFeed(feed: Feed, current: CalendarDefaults, known: Map<string, Calendar>) {
+    if (refreshingFeeds.has(feed.token)) return;
     refreshingFeeds.add(feed.token);
     try {
       if (options.account() !== feed.account) return;
@@ -250,7 +251,8 @@ export function createCalendarFeeds(db: Database.Database, options: {
     const account = options.account();
     if (!account || refreshes.has(account)) return;
     const current = defaults();
-    const due = feeds(account).reduce((earliest, feed) => Math.min(earliest, feedDue(feed, current)), directoryDue(account, current));
+    const due = feeds(account).filter(feed => !refreshingFeeds.has(feed.token))
+      .reduce((earliest, feed) => Math.min(earliest, feedDue(feed, current)), directoryDue(account, current));
     timer = setTimeout(() => void refresh(false), Math.max(0, due - Date.now())).unref();
   }
 
@@ -313,6 +315,18 @@ export function createCalendarFeeds(db: Database.Database, options: {
   admin.post("/refresh", (_req, res) => {
     if (!options.account()) { res.status(409).json({ error: "Enable Calendar Access in Microsoft settings first." }); return; }
     void refresh();
+    res.status(202).json({ refreshing: true });
+  });
+
+  admin.post("/:id/refresh", (req, res) => {
+    const account = options.account();
+    if (!account) { res.status(409).json({ error: "Enable Calendar Access in Microsoft settings first." }); return; }
+    const feed = feedById.get(req.params.id, account) as Feed | undefined;
+    if (!feed) { res.sendStatus(404); return; }
+    if (!refreshingFeeds.has(feed.token)) {
+      const known = new Map(localCalendars(account).map(calendar => [calendar.id, calendar]));
+      void refreshFeed(feed, defaults(), known).finally(schedule).catch(() => undefined);
+    }
     res.status(202).json({ refreshing: true });
   });
 
