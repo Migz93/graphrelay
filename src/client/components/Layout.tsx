@@ -3,7 +3,7 @@ import { Link, NavLink } from "react-router-dom";
 import { Beaker, CalendarDays, Code2, LayoutDashboard, ListChecks, LogOut, Menu, Server, Settings } from "lucide-react";
 import { useDialogA11y } from "../hooks/useDialogA11y";
 
-type SessionUser = { username: string; displayName: string; email?: string };
+type SessionUser = { username: string; microsoftAccount: string | null };
 
 export type BuildInfo = { version: string; channel: string; revision: string };
 
@@ -15,6 +15,7 @@ const nav = [
 ];
 
 export default function Layout({ user, onLogout, build, children }: { build: BuildInfo; user: SessionUser | null; onLogout: () => void; children: React.ReactNode }) {
+  const accountLabel = user?.microsoftAccount ?? user?.username;
   const [accountOpen, setAccountOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
@@ -91,15 +92,15 @@ export default function Layout({ user, onLogout, build, children }: { build: Bui
             {accountOpen && (
               <div className="absolute bottom-[calc(100%+8px)] left-3 right-3 z-10 overflow-hidden rounded-xl border border-outline-variant/30 bg-background-container-highest shadow-lg">
                 <div className="overflow-hidden text-ellipsis whitespace-nowrap border-b border-outline-variant/30 px-4 py-3 text-sm font-medium">
-                  <div>{user.username}</div>
-                  {user.email && <small className="mt-0.5 block overflow-hidden text-ellipsis text-xs font-normal text-on-surface-variant">{user.email}</small>}
+                  <small className="block text-xs font-normal text-on-surface-variant">GraphRelay Username</small>
+                  <div className="truncate" title={user.username}>{user.username}</div>
                 </div>
                 <button type="button" className="flex w-full items-center gap-3 border-0 bg-transparent px-4 py-2.5 text-left text-sm font-medium text-on-surface-variant hover:bg-background-bright hover:text-on-surface" onClick={() => { setAccountOpen(false); onLogout(); }}><LogOut size={16} strokeWidth={1.75} /> Sign out</button>
               </div>
             )}
-            <button type="button" className="flex w-full min-w-0 items-center gap-3 rounded-lg border-0 bg-transparent px-3 py-2 text-left text-sm font-medium text-on-surface hover:bg-background-container-high" onClick={() => setAccountOpen((open) => !open)} aria-expanded={accountOpen}>
-                <span className="grid size-8 shrink-0 place-items-center rounded-full bg-background-bright text-xs font-semibold text-on-surface-variant">{user.displayName.charAt(0).toUpperCase()}</span>
-              <span className="overflow-hidden text-ellipsis whitespace-nowrap">{user.displayName}</span>
+            <button type="button" className="flex w-full min-w-0 items-center gap-3 rounded-lg border-0 bg-transparent px-3 py-2 text-left text-sm font-medium text-on-surface hover:bg-background-container-high" onClick={() => setAccountOpen((open) => !open)} aria-expanded={accountOpen} title={accountLabel}>
+              <span aria-hidden="true" className="grid size-8 shrink-0 place-items-center rounded-full bg-background-bright text-xs font-semibold text-on-surface-variant">{accountLabel?.charAt(0).toUpperCase()}</span>
+              <span className="truncate">{accountLabel}</span>
             </button>
           </>}
         </div>

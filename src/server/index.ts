@@ -18,7 +18,7 @@ import { aisles, capitalizeWords, itemKey, modes, planTitles, type Mode } from "
 declare module "express-session" {
   interface SessionData {
     admin?: boolean;
-    oauth?: { state: string; verifier: string; issued: number; calendars: boolean; redirectUri: string };
+    oauth?: { state: string; verifier: string; issued: number; calendars: boolean; redirectUri: string; returnToCalendar?: boolean };
   }
 }
 
@@ -427,7 +427,7 @@ const build = {
   channel: env.BUILD_CHANNEL ?? "custom",
   revision: env.COMMIT_SHA ?? "local",
 };
-app.get("/api/session", (req, res) => { res.json({ configured: adminConfigured(), signedIn: !!req.session.admin, ...(req.session.admin ? { build, username: adminUsername() } : {}) }); });
+app.get("/api/session", (req, res) => { res.json({ configured: adminConfigured(), signedIn: !!req.session.admin, ...(req.session.admin ? { build, username: adminUsername(), microsoftAccount: read("username") ?? null } : {}) }); });
 app.use("/api", (req, res, next) => {
   if (req.method !== "GET" && req.get("X-GraphRelay") !== "1") {
     res.sendStatus(403);
@@ -521,7 +521,7 @@ app.get("/api/dashboard", (_req, res) => {
   });
 });
 app.use("/api/calendar-feeds", calendarFeeds.admin);
-app.get("/api/microsoft", (_req, res) => { res.json({ account: read("username") ?? null, calendarAccess: !!calendarAccount(), redirectUri: microsoftRedirectUri(), trustProxy: network.trustProxy, clientId: setup?.clientId ?? (legacySetup ? env.MICROSOFT_CLIENT_ID : null), editable: !!setup }); });
+app.get("/api/microsoft", (_req, res) => { res.json({ account: read("username") ?? null, hasClientSecret: !!(setup?.clientSecret || (legacySetup && env.MICROSOFT_CLIENT_SECRET)), redirectUri: microsoftRedirectUri(), trustProxy: network.trustProxy, clientId: setup?.clientId ?? (legacySetup ? env.MICROSOFT_CLIENT_ID : null), editable: !!setup }); });
 app.put("/api/microsoft", (req, res) => {
   if (req.get("Origin") !== network.publicUrl) { res.sendStatus(403); return; }
   if (!setup) { res.sendStatus(409); return; }
@@ -572,8 +572,9 @@ app.post("/api/microsoft/connect", async (req, res) => {
   const redirectUri = microsoftRedirectUri();
   const state = randomBytes(32).toString("hex");
   const pkce = await new CryptoProvider().generatePkceCodes();
-  const calendars = req.body?.calendarAccess === true || !!calendarAccount();
-  req.session.oauth = { state, verifier: pkce.verifier, issued: Date.now(), calendars, redirectUri };
+  const returnToCalendar = req.body?.calendarAccess === true;
+  const calendars = returnToCalendar || !!calendarAccount();
+  req.session.oauth = { state, verifier: pkce.verifier, issued: Date.now(), calendars, redirectUri, returnToCalendar };
   const url = await msal!.getAuthCodeUrl({ scopes: calendars ? [...scopes, calendarScope] : scopes, redirectUri, state, codeChallenge: pkce.challenge, codeChallengeMethod: "S256", prompt: "select_account" });
   res.json({ url });
 });
@@ -607,7 +608,7 @@ app.get("/api/microsoft/callback", async (req, res) => {
     void calendarFeeds.refresh();
     lastDirectoryPoll = 0;
     schedulePoll(0);
-    res.redirect("/settings?tab=microsoft&connection=connected");
+    res.redirect(pending.returnToCalendar && calendarAccount() ? "/calendar" : "/settings?tab=microsoft&connection=connected");
   } catch (error) {
     const detail = error instanceof Error ? error.message.match(/AADSTS[0-9]{4,10}/)?.[0] : undefined;
     const reason = detail ?? "token-exchange";

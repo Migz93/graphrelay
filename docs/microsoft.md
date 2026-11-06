@@ -6,10 +6,11 @@ GraphRelay uses a single Microsoft account for To Do and optional Outlook Calend
 
 1. In the Microsoft Entra admin center, open **App registrations → New registration**. Choose a supported account type that includes personal Microsoft accounts if you use Outlook.com or another personal Microsoft account.
 2. Under **Authentication**, add a redirect URI on the **Web** platform. Use the full **Microsoft Redirect URI** displayed in **Settings → Microsoft**.
-3. Under **API permissions**, add the Microsoft Graph delegated permission `Tasks.ReadWrite`. Add delegated `Calendars.Read` if you plan to use Calendar.
-4. Under **Certificates & secrets**, create a client secret and copy its **Value** when it appears. Copy the **Application (client) ID** from the app overview.
-5. In **Settings → Microsoft**, open **Setup Instructions** and save those values. Select **Connect Microsoft** and sign in with the account you want GraphRelay to use. For a shared shopping list, use the owner’s account.
-6. To enable Calendar, select **Enable Calendar Access** and consent using the same account.
+3. Under **Certificates & secrets**, create a client secret and copy its **Value** when it appears. Copy the **Application (client) ID** from the app overview.
+4. In **Settings → Microsoft**, open **Setup Instructions** and save those values. Select **Connect Microsoft** and sign in with the account you want GraphRelay to use. For a shared shopping list, use the owner’s account.
+5. To enable Calendar, open **Calendar → Enable Calendar Access** and consent using the same account.
+
+GraphRelay requests delegated `Tasks.ReadWrite` at sign-in and `Calendars.Read` when Calendar is enabled. Work or school accounts may require administrator approval. [Microsoft’s dynamic consent guide](https://learn.microsoft.com/en-us/entra/identity-platform/consent-types-developer#incremental-and-dynamic-user-consent)
 
 See [Microsoft’s registration guide](https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-register-app) and [Graph permissions reference](https://learn.microsoft.com/en-us/graph/permissions-reference).
 
@@ -19,7 +20,7 @@ GraphRelay appends `/api/microsoft/callback` to the configured **Public URL**. T
 
 **Use This Address** is available for HTTPS and HTTP localhost when the browser address differs. Begin the Microsoft flow from the configured origin in a tab already signed in to GraphRelay. The browser needs to reach the callback and carry the same session cookie. See [Deployment](deployment.md) for proxy configuration and [Microsoft’s redirect URI rules](https://learn.microsoft.com/en-us/entra/identity-platform/reply-url).
 
-GraphRelay checks To Do access after sign-in and checks Calendar access if granted. Use **Test Connection** to repeat the check later.
+GraphRelay checks To Do access after sign-in and checks Calendar access if granted. Use **Test Connection** to repeat the check later. **Reconnect Microsoft** appears after an access check or sign-in reports a problem. A masked placeholder shows that a client secret is already saved.
 
 ## Troubleshooting
 

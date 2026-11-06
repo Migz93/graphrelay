@@ -17,7 +17,7 @@ import Dashboard from "./Dashboard";
 import MicrosoftSettings from "./MicrosoftSettings";
 import { SettingsDialog } from "./components/SettingsDialog";
 
-type Session = { configured: boolean } & ({ signedIn: false } | { signedIn: true; build: BuildInfo; username: string });
+type Session = { configured: boolean } & ({ signedIn: false } | { signedIn: true; build: BuildInfo; username: string; microsoftAccount: string | null });
 type List = {
   id: string; displayName: string; isShared: boolean; isOwner: boolean;
   enrolled: boolean; mode: string; order: string[]; lastRun?: string; error?: string;
@@ -152,7 +152,7 @@ function NetworkSettings() {
   </SectionCard>;
 }
 
-function Settings({ build }: { build: BuildInfo }) {
+function Settings({ build, onMicrosoftAccountChange }: { build: BuildInfo; onMicrosoftAccountChange: (account: string | null) => void }) {
   const [params, setParams] = useSearchParams();
   const [busy, setBusy] = useState(false);
   const tabs = [{ id: "general", label: "General" }, { id: "microsoft", label: "Microsoft" }, { id: "todo", label: "To Do" }, { id: "calendar", label: "Calendar" }, { id: "about", label: "About" }];
@@ -178,7 +178,7 @@ function Settings({ build }: { build: BuildInfo }) {
         className={`flex-1 whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-all ${tab === value.id ? "bg-background-container text-on-surface shadow-sm" : "text-on-surface-variant hover:text-on-surface"}`}>{value.label}</button>)}
     </nav>
     {tab === "general" && <NetworkSettings />}
-    {tab === "microsoft" && <MicrosoftSettings />}
+    {tab === "microsoft" && <MicrosoftSettings onAccountChange={onMicrosoftAccountChange} />}
     {(tab === "todo" || tab === "calendar") && <nav aria-label={tab === "todo" ? "To Do Settings Sections" : "Calendar Settings Sections"} className="mb-6 flex w-fit max-w-full gap-1 rounded-xl bg-background-container-high p-1">
       {sections.map(value => <button key={value.id} type="button" disabled={busy} aria-pressed={section === value.id}
         onClick={() => { if (!busy) setParams({ tab, section: value.id }); }}
@@ -1026,7 +1026,7 @@ export default function App() {
   if (!session) return <PageLoading label="Loading GraphRelay…" />;
   if (!session.configured) return <Login firstRun onLogin={refresh} />;
   if (!session.signedIn) return <Login onLogin={refresh} />;
-  return <Layout build={session.build} user={{ username: session.username, displayName: session.username }} onLogout={logout}>
+  return <Layout build={session.build} user={{ username: session.username, microsoftAccount: session.microsoftAccount }} onLogout={logout}>
     <Routes>
       <Route path="/dashboard" element={<Dashboard />} />
       <Route path="/setup/microsoft" element={<Page className="space-y-4">
@@ -1039,8 +1039,10 @@ export default function App() {
         </SectionCard>
       </Page>} />
       <Route path="/todo/*" element={<ToDo />} />
-      <Route path="/calendar" element={<CalendarFeeds />} />
-      <Route path="/settings" element={<Settings build={session.build} />} />
+      <Route path="/calendar" element={<CalendarFeeds microsoftConnected={!!session.microsoftAccount} />} />
+      <Route path="/settings" element={<Settings build={session.build} onMicrosoftAccountChange={microsoftAccount => {
+        setSession(current => current?.signedIn ? { ...current, microsoftAccount } : current);
+      }} />} />
       <Route path="*" element={<Navigate replace to="/dashboard" />} />
     </Routes>
   </Layout>;

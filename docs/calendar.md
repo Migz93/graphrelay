@@ -1,6 +1,6 @@
 # Calendar
 
-Enable [Calendar Access](microsoft.md) before using events or subscription feeds.
+Open **Calendar → Enable Calendar Access** and consent with the [connected Microsoft account](microsoft.md) before using events or subscription feeds.
 
 ## Events View
 

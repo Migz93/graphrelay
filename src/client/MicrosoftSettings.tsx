@@ -6,15 +6,16 @@ import { api } from "./lib/api";
 import { useActionFeedback } from "./lib/useActionFeedback";
 import { cn } from "./lib/utils";
 
-type Connection = { account: string | null; calendarAccess: boolean; redirectUri: string; trustProxy: boolean; clientId: string | null; editable: boolean };
+type Connection = { account: string | null; hasClientSecret: boolean; redirectUri: string; trustProxy: boolean; clientId: string | null; editable: boolean };
 type AccessCheck = { todo: boolean; calendar: boolean | null };
 
-export default function MicrosoftSettings() {
+export default function MicrosoftSettings({ onAccountChange }: { onAccountChange: (account: string | null) => void }) {
   const [connection, setConnection] = useState<Connection>();
   const [error, setError] = useState("");
   const [action, setAction] = useState<"address" | "save" | "connect" | "test">();
   const [clientId, setClientId] = useState("");
   const [secret, setSecret] = useState("");
+  const [credentialsNeedReconnect, setCredentialsNeedReconnect] = useState(false);
   const [access, setAccess] = useState<AccessCheck>();
   const [copyHint, setCopyHint] = useState(false);
   const redirectInput = useRef<HTMLInputElement>(null);
@@ -75,7 +76,10 @@ export default function MicrosoftSettings() {
     clearFeedback();
     try {
       await api("/microsoft", "PUT", { clientId, clientSecret: secret });
-      setConnection(await api<Connection>("/microsoft"));
+      const updated = await api<Connection>("/microsoft");
+      setConnection(updated);
+      onAccountChange(updated.account);
+      setCredentialsNeedReconnect(!!updated.account && reconnectNeeded);
       setSecret("");
       clearOutcome();
       showFeedback("save");
@@ -86,11 +90,11 @@ export default function MicrosoftSettings() {
     }
   }
 
-  async function connect(calendarAccess = false) {
+  async function connect() {
     setAction("connect");
     setError("");
     try {
-      const { url } = await api<{ url: string }>("/microsoft/connect", "POST", { calendarAccess });
+      const { url } = await api<{ url: string }>("/microsoft/connect", "POST");
       window.location.assign(url);
     } catch (error) {
       setError((error as Error).message);
@@ -123,6 +127,7 @@ export default function MicrosoftSettings() {
         ? "The Microsoft sign-in session expired or did not match. Start again from Connect Microsoft in this tab."
         : "Microsoft sign-in failed." + (/^AADSTS[0-9]{4,10}$/.test(reason) ? " Microsoft error " + reason + "." : "") + " Try connecting again."
       : "";
+  const reconnectNeeded = credentialsNeedReconnect || outcome === "failed" || outcome === "wrong-account" || access?.todo === false || access?.calendar === false;
   const connectDisabled = !!action || !connection?.clientId || !onConfiguredOrigin;
 
   return <div className="space-y-5">
@@ -131,21 +136,16 @@ export default function MicrosoftSettings() {
     {connection && <>
       <SectionCard title="Microsoft Connection" description="Manage the account GraphRelay uses for To Do and Calendar.">
         <SettingRow label="Account" hint={connection.account ?? "Follow the setup instructions below."} action>
-          {connection.account
-            ? <button className={primaryButtonClass} disabled={connectDisabled} onClick={() => void connect()}>Reconnect Microsoft</button>
-            : <span className="text-sm text-on-surface-variant">Not Connected</span>}
-        </SettingRow>
-        <SettingRow label="Calendar Access" hint={connection.calendarAccess ? "Granted" : "Optional. Allow GraphRelay to read your calendars."} action>
-          {connection.calendarAccess
-            ? <Link className={secondaryButtonClass} to="/calendar">Open Calendar</Link>
-            : <button className={secondaryButtonClass} disabled={connectDisabled || !connection.account} onClick={() => void connect(true)}>Enable Calendar Access</button>}
+          {connection.account && reconnectNeeded
+            ? <button className={primaryButtonClass} disabled={connectDisabled || secretError} onClick={() => void connect()}>Reconnect Microsoft</button>
+            : <span className="text-sm text-on-surface-variant">{connection.account ? "Connected" : "Not Connected"}</span>}
         </SettingRow>
         {connection.account && <div>
           <button className={secondaryButtonClass} disabled={!!action} onClick={() => void testConnection()}>
             {action === "test" ? "Testing…" : "Test Connection"}
           </button>
           {access && <p role="status" className="mt-2 text-sm">
-            To Do: {access.todo ? "Working" : "Could not read lists"} · Calendar: {access.calendar === null ? "Access not granted" : access.calendar ? "Working" : "Could not read calendars"}
+            To Do: {access.todo ? "Working" : "Could not read lists"}{access.calendar !== null && (access.calendar ? " · Calendar: Working" : " · Could not read calendars")}
           </p>}
         </div>}
       </SectionCard>
@@ -188,10 +188,6 @@ export default function MicrosoftSettings() {
               <a href="https://entra.microsoft.com/" target="_blank" rel="noreferrer" className={cn(secondaryButtonClass, "mt-2")}>Open Microsoft Entra</a>
             </li>
             <li>
-              <strong>Add Microsoft Graph permissions</strong>
-              <p className="mt-1 text-on-surface-variant">In <strong>API permissions → Add a permission → Microsoft Graph → Delegated permissions</strong>, add <code>Tasks.ReadWrite</code>. Add <code>Calendars.Read</code> when you want Calendar access.</p>
-            </li>
-            <li>
               <strong>Save your app credentials</strong>
               <p className="mt-1 text-on-surface-variant">Copy the client ID from <strong>Overview</strong>. Go to <strong>Certificates &amp; secrets → Client secrets → New client secret</strong> and copy its <strong>Value</strong> before leaving Entra.</p>
               {secretError && <ErrorBanner message={reason === "AADSTS7000222" ? "The Microsoft client secret expired. Create a new one and paste its Value below." : "Microsoft rejected the client secret. Paste the secret Value from Entra and check that it belongs to this client ID."} />}
@@ -200,7 +196,7 @@ export default function MicrosoftSettings() {
                   <TextInput value={clientId} onChange={setClientId} autoComplete="off" required disabled={!!action} />
                 </label>
                 <label className="grid gap-2">Client Secret Value
-                  <TextInput type="password" value={secret} onChange={setSecret} autoComplete="off" required disabled={!!action} />
+                  <TextInput type="password" value={secret} onChange={setSecret} placeholder={connection.hasClientSecret ? "********" : undefined} autoComplete="off" required disabled={!!action} />
                 </label>
                 <div><button className={cn(secondaryButtonClass, "min-w-56", feedback === "save" && successButtonClass)} aria-live="polite" disabled={!!action || !onConfiguredOrigin}>
                   {action === "save" ? "Saving…" : feedback === "save" ? "Saved" : "Save Microsoft Credentials"}
@@ -209,7 +205,7 @@ export default function MicrosoftSettings() {
             </li>
             <li>
               <strong>Connect your account</strong>
-              <p className="mt-1 text-on-surface-variant">After saving, select Connect Microsoft. GraphRelay checks access when you return.</p>
+              <p className="mt-1 text-on-surface-variant">Microsoft asks for To Do access during sign-in. Work or school accounts may need approval from an administrator.</p>
               {!connection.account && <button className={cn(primaryButtonClass, "mt-2")} disabled={connectDisabled} onClick={() => void connect()}>Connect Microsoft</button>}
             </li>
           </ol>
