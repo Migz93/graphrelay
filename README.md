@@ -36,14 +36,14 @@ Tick the calendars you want to see together, or switch to **Feeds** to manage yo
 
 ## Key Features
 
-- Start with the built-in grocery groups or make your own. Choose named labels like `03 Frozen` or number-only labels like `03`.
+- Start with the built-in grocery groups or make your own. Choose a named prefix like `03 Frozen · Peas` or a number-only prefix like `03 · Peas`.
 - Preview duplicate tasks and see which copy will be kept before removing anything. You can also turn on automatic cleanup for selected lists.
 - Choose how often GraphRelay checks each list, or select **Sync Now** to update it immediately.
 - Decide which calendars go into each subscription, how often GraphRelay refreshes it, and how far back and ahead it includes events.
 
 ## How It Works
 
-**For a shared shopping list**, pick the list in GraphRelay and turn on grouping. Everyone can keep adding and checking off items in Microsoft To Do as usual. GraphRelay checks the list in the background and adds labels so things like peas and ice cream sit together when the list is sorted alphabetically. If an item lands in the wrong aisle, change its group in GraphRelay and GraphRelay remembers that choice for lists using the same grouping profile.
+**For a shared shopping list**, pick the list in GraphRelay and turn on grouping. Everyone can keep adding and checking off items in Microsoft To Do as usual. GraphRelay checks the list in the background and adds a prefix to each task title, such as `03 Frozen · Peas`. Items in the same aisle then sit together when the list is sorted alphabetically. If an item lands in the wrong aisle, change its group in GraphRelay and GraphRelay remembers that choice for lists using the same grouping profile.
 
 **For calendars**, choose the Outlook calendars you want in a feed and copy its subscription link into your calendar app. For example, you can combine your personal and family calendars into one subscription. GraphRelay keeps the feed up to date as events change in Outlook.
 
