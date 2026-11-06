@@ -2,13 +2,14 @@ import { DndContext, DragOverlay, KeyboardSensor, PointerSensor, closestCenter, 
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { cn } from "./lib/utils";
+import { useActionFeedback } from "./lib/useActionFeedback";
 import { compactMatches, groupingDraft, matchKey, moveMatch, removeGroup, type GroupDraft, type MatchGroup } from "./lib/groupingDraft";
 import { GripVertical, Minus, Plus, X } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import Layout, { type BuildInfo } from "./components/Layout";
 import { ErrorBanner, Page, PageHeader, PageLoading } from "./components/Page";
-import { dangerButtonClass, SectionCard, SelectInput, SettingRow, SettingToggle, TextInput, primaryButtonClass, secondaryButtonClass } from "./components/FormControls";
+import { dangerButtonClass, SectionCard, SelectInput, SettingRow, SettingToggle, TextInput, primaryButtonClass, secondaryButtonClass, successButtonClass } from "./components/FormControls";
 
 import { api, sessionExpiredEvent, SessionExpiredError } from "./lib/api";
 import CalendarFeeds, { CalendarSettings } from "./CalendarFeeds";
@@ -108,7 +109,7 @@ type Network = { publicUrl: string; trustProxy: boolean; redirectUri: string };
 function NetworkSettings({ onSaved }: { onSaved: () => void }) {
   const [settings, setSettings] = useState<Network>();
   const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState("");
+  const { feedback: saved, showFeedback, clearFeedback } = useActionFeedback();
   const [error, setError] = useState("");
   useEffect(() => {
     void api<Network>("/network").then(setSettings).catch(error => setError(error.message));
@@ -117,11 +118,11 @@ function NetworkSettings({ onSaved }: { onSaved: () => void }) {
     event.preventDefault();
     if (!settings) return;
     setBusy(true);
-    setNotice("");
+    clearFeedback();
     setError("");
     try {
       setSettings(await api<Network>("/network", "PUT", { publicUrl: settings.publicUrl, trustProxy: settings.trustProxy }));
-      setNotice("Network settings saved.");
+      showFeedback(true);
       onSaved();
     } catch (error) {
       setError((error as Error).message);
@@ -133,17 +134,18 @@ function NetworkSettings({ onSaved }: { onSaved: () => void }) {
     {error && <ErrorBanner message={error} />}
     {settings && <form className="grid gap-4" onSubmit={save}>
       <SettingToggle label="Trust Proxy" hint="Use forwarded HTTPS and client address information from one trusted reverse proxy." checked={settings.trustProxy}
-        onChange={trustProxy => { setNotice(""); setSettings({ ...settings, trustProxy }); }} />
+        onChange={trustProxy => { clearFeedback(); setSettings({ ...settings, trustProxy }); }} />
       <label className="grid gap-2 text-sm">Public URL
         <TextInput type="url" value={settings.publicUrl} placeholder="https://graphrelay.example.com" disabled={busy} required
-          onChange={publicUrl => { setNotice(""); setSettings({ ...settings, publicUrl }); }} />
+          onChange={publicUrl => { clearFeedback(); setSettings({ ...settings, publicUrl }); }} />
       </label>
       <label className="grid gap-2 text-sm">Microsoft Redirect URI
         <TextInput readOnly value={settings.redirectUri} onChange={() => undefined} onFocus={event => event.currentTarget.select()} />
         <span className="text-on-surface-variant">Add this exact URL as a Web redirect URI in Microsoft Entra.</span>
       </label>
-      <div><button className={primaryButtonClass} disabled={busy}>{busy ? "Saving…" : "Save Network"}</button></div>
-      {notice && <p role="status" className="text-sm text-success">{notice}</p>}
+      <div><button className={cn(primaryButtonClass, "min-w-32", saved && successButtonClass)} aria-live="polite" disabled={busy}>
+        {busy ? "Saving…" : saved ? "Saved" : "Save Network"}
+      </button></div>
     </form>}
   </SectionCard>;
 }
@@ -156,9 +158,11 @@ function MicrosoftSettings() {
   const [secret, setSecret] = useState("");
   const [savedSecret, setSavedSecret] = useState(false);
   const [savingSecret, setSavingSecret] = useState(false);
+  const { feedback: credentialsSaved, showFeedback, clearFeedback } = useActionFeedback();
   async function saveSecret(event: FormEvent) {
     event.preventDefault();
     setError("");
+    clearFeedback();
     setSavedSecret(false);
     setSavingSecret(true);
     try {
@@ -166,6 +170,7 @@ function MicrosoftSettings() {
       setConnection(await api<Connection>("/microsoft"));
       setSecret("");
       setSavedSecret(true);
+      showFeedback(true);
     } catch (error) {
       setError((error as Error).message);
     } finally {
@@ -212,17 +217,18 @@ function MicrosoftSettings() {
         {!onConfiguredOrigin && <p className="text-sm text-on-surface-variant">
           Open <a className="break-all underline" href={configuredOrigin + "/settings"}>{configuredOrigin}</a> to connect Microsoft or update app credentials.
         </p>}
-        {connection.editable && <details open={!connection.clientId || outcome === "failed"}>
+        {connection.editable && <details open={!connection.clientId || outcome === "failed" || savedSecret}>
           <summary className="cursor-pointer text-sm">Microsoft App Credentials</summary>
-          <form onSubmit={saveSecret} className="mt-3 grid gap-3">
+          <form onSubmit={saveSecret} onChange={clearFeedback} className="mt-3 grid gap-3">
             <label className="grid gap-2 text-sm">Application (Client) ID
               <TextInput value={clientId} onChange={setClientId} autoComplete="off" required />
             </label>
             <label className="grid gap-2 text-sm">Client Secret Value
               <TextInput type="password" value={secret} onChange={setSecret} autoComplete="off" required />
             </label>
-            <div><button className={secondaryButtonClass} disabled={savingSecret}>Save Microsoft Credentials</button></div>
-            {savedSecret && <p role="status" className="text-sm text-success">Microsoft credentials saved. Select Connect Microsoft to try again.</p>}
+            <div><button className={cn(secondaryButtonClass, "min-w-56", credentialsSaved && successButtonClass)} aria-live="polite" disabled={savingSecret}>
+              {savingSecret ? "Saving…" : credentialsSaved ? "Saved" : "Save Microsoft Credentials"}
+            </button></div>
           </form>
         </details>}
       </>}
@@ -283,7 +289,8 @@ function ItemAisles({ path, aisles, grouped, refresh }: { path: string; aisles: 
   const [snapshot, setSnapshot] = useState<{ items: ListItem[]; completed: { id: string; name: string }[]; syncedAt: string | null }>();
   const items = snapshot?.items;
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  const [deferred, setDeferred] = useState(false);
+  const { feedback: savedItem, showFeedback, clearFeedback } = useActionFeedback<string>();
   const [busy, setBusy] = useState(false);
   async function load() {
     setBusy(true);
@@ -299,12 +306,14 @@ function ItemAisles({ path, aisles, grouped, refresh }: { path: string; aisles: 
   async function change(item: ListItem, aisle: string) {
     setBusy(true);
     setError("");
-    setNotice("");
+    clearFeedback();
+    setDeferred(false);
     try {
       const result = await api<{ applied: boolean }>(path + "/items/" + encodeURIComponent(item.id) + "/aisle", "PUT", { name: item.name, aisle });
-      setNotice(result.applied ? "Aisle saved for future additions." : "Aisle saved. GraphRelay will apply it on a later run.");
+      setDeferred(!result.applied);
       await load();
       await refresh();
+      if (result.applied) showFeedback(item.id);
     } catch (error) {
       setError((error as Error).message);
     } finally {
@@ -329,7 +338,8 @@ function ItemAisles({ path, aisles, grouped, refresh }: { path: string; aisles: 
     </div>
     {grouped && <p className="text-sm text-on-surface-variant">Group corrections are saved for items with the same name on this list.</p>}
     {error && <ErrorBanner message={error} />}
-    {notice && <p role="status" className="text-sm text-success">{notice}</p>}
+    <span role="status" className="sr-only">{savedItem ? "Group correction saved." : ""}</span>
+    {deferred && <p role="status" className="text-sm text-warning">Group correction saved. GraphRelay will apply it on a later sync.</p>}
     {!items && busy && <p>Loading open items…</p>}
     {snapshot?.syncedAt === null && <p>Waiting for the first Microsoft sync.</p>}
     {snapshot?.syncedAt && <p className="text-xs text-on-surface-variant">Items synced {new Date(snapshot.syncedAt).toLocaleString()}</p>}
@@ -346,7 +356,7 @@ function ItemAisles({ path, aisles, grouped, refresh }: { path: string; aisles: 
           {group.map(item => <li key={item.id}>
             <label className="grid grid-cols-[minmax(0,1fr)_9rem] items-center gap-3 py-2 text-sm sm:grid-cols-[minmax(0,1fr)_12rem]">
               <span className="min-w-0 break-words">{item.name}</span>
-              <SelectInput aria-label={"Group for " + item.name} value={aisles.includes(item.aisle) ? item.aisle : "Other"} onChange={value => void change(item, value)} disabled={busy}>
+              <SelectInput className={savedItem === item.id ? "border-success" : ""} aria-label={"Group for " + item.name} value={aisles.includes(item.aisle) ? item.aisle : "Other"} onChange={value => void change(item, value)} disabled={busy}>
                 {aisles.map(option => <option key={option} value={option}>{option}</option>)}
               </SelectInput>
             </label>
@@ -660,7 +670,7 @@ function GroupingProfiles({ onBusy }: { onBusy: (busy: boolean) => void }) {
     </div>
     <div className="mt-4 flex shrink-0 items-center justify-end gap-2 border-t border-outline-variant/30 pt-4">
       <button type="button" className={secondaryButtonClass} disabled={busy} onClick={() => choose(selected)}>Cancel</button>
-      <button className={cn(primaryButtonClass, "min-w-32", notice && "bg-success text-background hover:bg-success")} aria-live="polite" disabled={busy || !profiles}>{busy ? "Saving…" : notice ? "Saved" : "Save Changes"}</button>
+      <button className={cn(primaryButtonClass, "min-w-32", notice && successButtonClass)} aria-live="polite" disabled={busy || !profiles}>{busy ? "Saving…" : notice ? "Saved" : "Save Changes"}</button>
     </div>
   </form>;
 }
@@ -805,7 +815,7 @@ function ListDetail({ list, refresh }: { list: List; refresh: () => Promise<void
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [error, setError] = useState("");
   const [syncing, setSyncing] = useState(false);
-  const [syncNotice, setSyncNotice] = useState("");
+  const { feedback: synced, showFeedback, clearFeedback } = useActionFeedback();
   const path = "/lists/" + encodeURIComponent(list.id);
   useEffect(() => {
     if (list.enrolled || list.lastRun) return;
@@ -835,18 +845,20 @@ function ListDetail({ list, refresh }: { list: List; refresh: () => Promise<void
   async function sync() {
     setSyncing(true);
     setError("");
-    setSyncNotice("");
+    clearFeedback();
+    let completed = false;
     try {
       await api(path + "/sync", "POST");
-      setSyncNotice("Sync complete.");
+      completed = true;
     } catch (error) {
       setError((error as Error).message);
     } finally {
       setItemRevision(value => value + 1);
       setPreviewRevision(value => value + 1);
       setHistory(undefined);
-      await refresh();
+      await refresh().catch(error => setError(previous => previous || (error as Error).message));
       setSyncing(false);
+      if (completed) showFeedback(true);
     }
   }
   async function activity() {
@@ -864,7 +876,9 @@ function ListDetail({ list, refresh }: { list: List; refresh: () => Promise<void
   return <Page className="space-y-5">
     <Link to="/todo" className="text-sm text-on-surface-variant">← To Do</Link>
     <PageHeader title={list.displayName}>
-      <button className={primaryButtonClass} disabled={syncing} onClick={() => void sync()}>{syncing ? "Syncing…" : "Sync Now"}</button>
+      <button className={cn(primaryButtonClass, "min-w-28", synced && successButtonClass)} aria-live="polite" disabled={syncing} onClick={() => void sync()}>
+        {syncing ? "Syncing…" : synced ? "Synced" : "Sync Now"}
+      </button>
       {list.enrolled ? <button className={secondaryButtonClass} onClick={() => setSettings(true)}>List Settings</button> : <>
         <button className={enrollment === "confirm" ? primaryButtonClass : secondaryButtonClass} disabled={enrollment === "pending"} onClick={() => void enroll()}>
           {enrollment === "pending" ? "Enrolling…" : enrollment === "confirm" ? "Are You Sure?" : "Enroll List"}
@@ -876,7 +890,6 @@ function ListDetail({ list, refresh }: { list: List; refresh: () => Promise<void
     </PageHeader>
     <p className="text-sm text-on-surface-variant">{runStatus(list)}</p>
     {list.unenrollPending && <p className="text-sm text-warning">Unenrollment is unfinished. Open List settings to retry.</p>}
-    {syncNotice && <p role="status" className="text-sm text-success">{syncNotice}</p>}
     {(error || list.error) && <ErrorBanner message={error || list.error!} />}
     {history && <SectionCard title="Activity">
       <ul className="grid gap-2 text-sm">

@@ -1,10 +1,11 @@
 import { lazy, Suspense, useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { ErrorBanner, Page, PageHeader, PageLoading } from "./components/Page";
-import { SectionCard, SelectInput, TextInput, compactSecondaryButtonClass, dangerButtonClass, primaryButtonClass, secondaryButtonClass } from "./components/FormControls";
+import { SectionCard, SelectInput, TextInput, compactSecondaryButtonClass, dangerButtonClass, primaryButtonClass, secondaryButtonClass, successButtonClass } from "./components/FormControls";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { api } from "./lib/api";
 import { cn } from "./lib/utils";
+import { useActionFeedback } from "./lib/useActionFeedback";
 
 const CalendarView = lazy(() => import("./CalendarView"));
 
@@ -58,7 +59,7 @@ export function CalendarSettings({ section }: { section: "general" | "feeds" }) 
   const [past, setPast] = useState("");
   const [future, setFuture] = useState("");
   const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState("");
+  const { feedback: saved, showFeedback, clearFeedback } = useActionFeedback();
   const [error, setError] = useState("");
   function apply(value: Defaults) {
     setSettings(value);
@@ -72,12 +73,12 @@ export function CalendarSettings({ section }: { section: "general" | "feeds" }) 
   async function save(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
-    setNotice("");
+    clearFeedback();
     setError("");
     try {
       const body = section === "general" ? { intervalMinutes: Number(interval) } : { pastDays: Number(past), futureDays: Number(future) };
       apply(await api<Defaults>("/calendar-feeds/settings", "PUT", body));
-      setNotice("Calendar settings saved.");
+      showFeedback(true);
     } catch (error) {
       setError((error as Error).message);
     } finally {
@@ -87,11 +88,12 @@ export function CalendarSettings({ section }: { section: "general" | "feeds" }) 
   return <SectionCard title={section === "general" ? "Calendar Refresh" : "Feed Date Range"}
     description={section === "general" ? "How often GraphRelay checks for calendars and refreshes feeds that use the global interval." : "Set how many days before and after today each feed includes by default."}>
     {error && <ErrorBanner message={error} />}
-    {settings && <form className="grid gap-4" onSubmit={save} onChange={() => setNotice("")}>
+    {settings && <form className="grid gap-4" onSubmit={save} onChange={clearFeedback}>
       {section === "general" ? <RefreshInterval value={interval} change={setIntervalValue} settings={settings} />
         : <FeedWindow past={past} future={future} setPast={setPast} setFuture={setFuture} settings={settings} />}
-      <div><button className={primaryButtonClass} disabled={busy}>{busy ? "Saving…" : "Save Changes"}</button></div>
-      {notice && <p role="status" className="text-sm text-success">{notice}</p>}
+      <div><button className={cn(primaryButtonClass, "min-w-32", saved && successButtonClass)} aria-live="polite" disabled={busy}>
+        {busy ? "Saving…" : saved ? "Saved" : "Save Changes"}
+      </button></div>
     </form>}
   </SectionCard>;
 }
@@ -244,7 +246,7 @@ function FeedLink({ feed, settings, busy, onEdit }: {
         </p>
       </div>
       <div className="flex flex-wrap gap-2">
-        <button className={cn(compactSecondaryButtonClass, "min-w-20", copiedAt !== 0 && "bg-success text-background hover:bg-success")}
+        <button className={cn(compactSecondaryButtonClass, "min-w-20", copiedAt !== 0 && successButtonClass)}
           aria-live="polite" onClick={() => void copy()}>{copiedAt ? "Copied" : "Copy Link"}</button>
         <button className={compactSecondaryButtonClass} disabled={busy} onClick={() => onEdit()}>Settings</button>
       </div>
