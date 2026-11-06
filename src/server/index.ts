@@ -1,5 +1,5 @@
 import pluralize from "pluralize";
-import { profileMatcher } from "./profile-matcher.js";
+import { assignProfileItem, profileMatcher } from "./profile-matcher.js";
 import express from "express";
 import session from "express-session";
 import { SqliteSessionStore } from "./session-store.js";
@@ -47,8 +47,6 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS lists (id TEXT PRIMARY KEY, name TEXT, mode TEXT, aisle_order TEXT);
   CREATE TABLE IF NOT EXISTS titles (list_id TEXT, task_id TEXT, base TEXT, applied TEXT, PRIMARY KEY(list_id, task_id));
   CREATE TABLE IF NOT EXISTS pending_titles (list_id TEXT, task_id TEXT, base TEXT, applied TEXT, PRIMARY KEY(list_id, task_id));
-  CREATE TABLE IF NOT EXISTS aisle_corrections (list_id TEXT, item_key TEXT, aisle TEXT NOT NULL, PRIMARY KEY(list_id, item_key));
-  CREATE TABLE IF NOT EXISTS group_corrections (list_id TEXT, profile_id TEXT, item_key TEXT, group_name TEXT NOT NULL, PRIMARY KEY(list_id, profile_id, item_key));
   CREATE TABLE IF NOT EXISTS activity (id INTEGER PRIMARY KEY, list_id TEXT, created TEXT DEFAULT CURRENT_TIMESTAMP, message TEXT);
 `);
 if (!(db.pragma("table_info(lists)") as { name: string }[]).some(column => column.name === "auto_cleanup")) {
@@ -299,13 +297,7 @@ function planList(list: Enrolled, tasks: Task[], recoverTitles = false) {
     db.prepare("DELETE FROM pending_titles WHERE list_id = ? AND task_id = ?").run(list.id, task.id);
   }
   const profile = listProfile(list);
-  const rows = (profile.grocery
-    ? db.prepare("SELECT item_key, aisle AS group_name FROM aisle_corrections WHERE list_id = ?").all(list.id)
-    : db.prepare("SELECT item_key, group_name FROM group_corrections WHERE list_id = ? AND profile_id = ?").all(list.id, profile.id)
-  ) as { item_key: string; group_name: string }[];
-  const order = profile.groups.map(group => group.name);
-  const corrections = new Map(rows.filter(row => order.includes(row.group_name)).map(row => [row.item_key, row.group_name]));
-  return planTitles(tasks, list.mode, order, originals, corrections, profileMatcher(profile));
+  return planTitles(tasks, list.mode, profile.groups.map(group => group.name), originals, profileMatcher(profile));
 }
 async function run(list: Enrolled, includeCleanup = false) {
   if (active.has(list.id) || read(unenrollKey(list.id))) return;
@@ -618,17 +610,24 @@ app.post("/api/list-directory/refresh", (_req, res) => {
   void syncDirectory();
   res.sendStatus(204);
 });
+function profileRevision(profile: Profile) {
+  return createHash("sha256").update(JSON.stringify(profile)).digest("hex");
+}
 app.get("/api/grouping-profiles", (_req, res) => {
   const lists = db.prepare("SELECT * FROM lists").all() as Enrolled[];
   res.json(profiles().map(profile => ({
-    ...profile, usedBy: lists.filter(list => list.mode !== "off" && listProfile(list).id === profile.id).length,
+    ...profile, revision: profileRevision(profile), usedBy: lists.filter(list => list.mode !== "off" && listProfile(list).id === profile.id).length,
   })));
 });
 app.put("/api/grouping-profiles/:id", (req, res) => {
   const values = profiles();
   const existing = values.find(profile => profile.id === req.params.id);
   if (!existing && req.params.id !== "new") { res.sendStatus(404); return; }
-  const { name, groups, allMatches } = req.body ?? {};
+  const { name, groups, allMatches, revision } = req.body ?? {};
+  if (existing && revision !== undefined && revision !== profileRevision(existing)) {
+    res.status(409).json({ error: "This grouping profile changed. Reopen Groupings to load the latest version before editing." });
+    return;
+  }
   if (typeof name !== "string" || !name.trim() || name.trim().length > 80
     || !Array.isArray(groups) || groups.length < 1 || groups.length > 30
     || !groups.every(group => typeof group?.name === "string" && !!group.name.trim() && group.name.trim().length <= 40
@@ -707,7 +706,7 @@ app.post("/api/lists/:id/unenroll", async (req, res) => {
     }
     db.transaction(() => {
       db.prepare("DELETE FROM lists WHERE id = ?").run(list.id);
-      for (const table of ["titles", "pending_titles", "aisle_corrections", "group_corrections", "activity"]) {
+      for (const table of ["titles", "pending_titles", "activity"]) {
         db.prepare("DELETE FROM " + table + " WHERE list_id = ?").run(list.id);
       }
       for (const key of [unenrollKey(list.id), profileKey(list.id), intervalKey(list.id), capitalizeItemsKey(list.id), "snapshot:" + list.id, "last:" + list.id, "error:" + list.id]) {
@@ -820,39 +819,36 @@ app.get("/api/lists/:id/items", (req, res) => {
   const snapshot = readSnapshot(req.params.id);
   res.json({ items: snapshot?.items ?? [], completed: snapshot?.completed ?? [], syncedAt: snapshot?.syncedAt ?? null });
 });
-app.put("/api/lists/:id/items/:taskId/aisle", async (req, res) => {
-  const { aisle, name } = req.body ?? {};
-  if (typeof aisle !== "string" || typeof name !== "string" || !itemKey(name)) {
-    res.status(400).json({ error: "Choose a valid item and aisle." });
-    return;
-  }
+app.route("/api/lists/:id/items/:taskId/group").all((req, res, next) => {
   const list = enrolledList(req.params.id);
-  if (!list) { res.sendStatus(404); return; }
-  if (active.has(list.id) || read(unenrollKey(list.id))) {
-    res.status(409).json({ error: "Wait for the current run or finish unenrolling this list." });
+  const item = list && readSnapshot(list.id)?.items.find(value => value.id === req.params.taskId);
+  if (!list || list.mode === "off" || !item || read(unenrollKey(list.id)) || !itemKey(item.name)) {
+    res.status(409).json({ error: "This item is no longer available for grouping. Refresh the list and try again." });
     return;
   }
-  const path = taskPath(list.id) + "/" + encodeURIComponent(req.params.taskId);
-  const task = await graph<Task>(path);
-  const currentList = enrolledList(list.id);
-  if (!currentList || active.has(list.id) || read(unenrollKey(list.id))) {
-    res.status(409).json({ error: "The list settings changed. Refresh and try again." });
+  const profile = listProfile(list);
+  res.locals.itemGroup = { name: itemKey(item.name), profile };
+  next();
+}).get((_req, res) => {
+  const { name, profile } = res.locals.itemGroup as { name: string; profile: Profile };
+  res.json({
+    name, profileId: profile.id, profileName: profile.name, revision: profileRevision(profile),
+    group: profileMatcher(profile)(name), groups: profile.groups.map(group => group.name),
+  });
+}).put((req, res) => {
+  const { name, profile } = res.locals.itemGroup as { name: string; profile: Profile };
+  const { name: expectedName, profileId, revision, group } = req.body ?? {};
+  if (expectedName !== name || profileId !== profile.id || revision !== profileRevision(profile)) {
+    res.status(409).json({ error: "This item or grouping profile changed. Reopen the item to load the latest version." });
     return;
   }
-  const profile = listProfile(currentList);
-  if (currentList.mode === "off" || !profile.groups.some(group => group.name === aisle)) {
-    res.status(409).json({ error: "Grouping settings changed. Refresh the list and try again." });
+  if (!profile.groups.some(value => value.name === group)) {
+    res.status(400).json({ error: "Choose a group from the current profile." });
     return;
   }
-  const [item] = planList(currentList, [task]);
-  if (task.status === "completed" || itemKey(item.base) !== itemKey(name)) {
-    res.status(409).json({ error: "This item changed in Microsoft To Do. Refresh the items and try again." });
-    return;
-  }
-  if (profile.grocery) db.prepare("INSERT OR REPLACE INTO aisle_corrections VALUES (?, ?, ?)").run(list.id, itemKey(item.base), aisle);
-  else db.prepare("INSERT OR REPLACE INTO group_corrections VALUES (?, ?, ?, ?)").run(list.id, profile.id, itemKey(item.base), aisle);
-  const applied = !active.has(list.id) && await run(currentList).then(() => true, () => false);
-  res.json({ applied });
+  const updated = assignProfileItem(profile, name, group);
+  groupingStore.save(updated);
+  res.json({ revision: profileRevision(updated) });
 });
 async function checklistFlags(path: string) {
   try {
@@ -872,8 +868,8 @@ type Check = { flags: string[]; modified?: string; expires: number };
 type DuplicateCopy = ReturnType<typeof previewCopy>;
 type Snapshot = {
   syncedAt: string;
-  items: { id: string; name: string; aisle: string }[];
-  completed?: { id: string; name: string }[];
+  items: { id: string; name: string; title?: string; aisle: string }[];
+  completed?: { id: string; name: string; title?: string }[];
   duplicates: { key: string; name: string; keep: DuplicateCopy; copies: DuplicateCopy[] }[];
   checks: Record<string, Check>;
 };
@@ -911,8 +907,8 @@ async function syncSnapshot(list: Enrolled, tasks?: Task[]) {
   if (client !== msal || account !== read("account")) return;
   const snapshot: Snapshot = {
     syncedAt: new Date().toISOString(),
-    items: planned.filter(task => task.status !== "completed").map(({ id, base, aisle }) => ({ id, name: base, aisle })),
-    completed: planned.filter(task => task.status === "completed").map(({ id, base }) => ({ id, name: base })),
+    items: planned.filter(task => task.status !== "completed").map(({ id, base, title, aisle }) => ({ id, name: base, title, aisle })),
+    completed: planned.filter(task => task.status === "completed").map(({ id, base, title }) => ({ id, name: base, title })),
     duplicates: groups.map(({ key, keep, copies }) => ({
       key, name: keep.base, keep: previewCopy(keep),
       copies: copies.map(task => previewCopy(task, [...detailFlags(task), ...(checks.get(task.id)?.flags ?? [])])),

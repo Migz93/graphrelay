@@ -12,13 +12,12 @@ export function capitalizeWords(name: string) {
     word.replace(/^\p{L}/u, first => first.toUpperCase()));
 }
 
-export function planTitles<T extends { id: string; title: string }>(tasks: T[], mode: Mode, order: string[], originals: Record<string, { base: string; applied: string }>, corrections: ReadonlyMap<string, string> = new Map(), match = groceryAisle) {
+export function planTitles<T extends { id: string; title: string }>(tasks: T[], mode: Mode, order: string[], originals: Record<string, { base: string; applied: string }>, match = groceryAisle) {
   const items = tasks.map(task => {
     const previous = originals[task.id];
     const prefix = previous?.applied.slice(0, previous.applied.length - previous.base.length);
     const base = prefix && task.title.startsWith(prefix) ? task.title.slice(prefix.length) : task.title;
-    const lookup = itemKey(base);
-    const assigned = corrections.get(lookup) ?? match(lookup);
+    const assigned = match(itemKey(base));
     const aisle = order.includes(assigned) ? assigned : "Other";
     return { ...task, base, aisle, rank: order.indexOf(aisle) };
   });

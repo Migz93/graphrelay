@@ -15,3 +15,20 @@ export function profileMatcher(profile: Profile) {
     return prefix?.name ?? defaults.get(product) ?? pluralDefaults.get(pluralize.singular(product)) ?? "Other";
   };
 }
+
+export function assignProfileItem(profile: Profile, name: string, destination: string): Profile {
+  const target = profile.groups.find(group => group.name === destination);
+  if (!target) throw new Error("The destination group is missing.");
+  const product = (profile.ignoreQuantities && groceryProductName(name)) || name;
+  const match = target.matchPlurals ? pluralize.singular(product) : product;
+  const keep = (value: string) => value !== name && value !== product
+    && (!target.matchPlurals || pluralize.singular(value) !== match);
+  return {
+    ...profile,
+    groups: profile.groups.map(group => ({
+      ...group,
+      matches: [...group.matches.filter(keep), ...(group === target ? [match] : [])],
+      defaultMatches: group.defaultMatches?.filter(keep),
+    })),
+  };
+}

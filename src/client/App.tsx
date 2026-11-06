@@ -4,7 +4,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { cn } from "./lib/utils";
 import { useActionFeedback } from "./lib/useActionFeedback";
 import { compactMatches, groupingDraft, matchKey, moveMatch, removeGroup, type GroupDraft, type MatchGroup } from "./lib/groupingDraft";
-import { GripVertical, Minus, Plus, X } from "lucide-react";
+import { ChevronRight, GripVertical, Minus, Plus, X } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import Layout, { type BuildInfo } from "./components/Layout";
@@ -283,93 +283,127 @@ function Settings({ build }: { build: BuildInfo }) {
   </Page>;
 }
 
-type ListItem = { id: string; name: string; aisle: string };
+type SyncedItem = { id: string; name: string; title?: string; aisle?: string };
+type ItemSnapshot = { items: SyncedItem[]; completed: SyncedItem[]; syncedAt: string | null };
+type ItemGrouping = { name: string; profileId: string; profileName: string; revision: string; group: string; groups: string[] };
 
-function ItemAisles({ path, aisles, grouped, refresh }: { path: string; aisles: string[]; grouped: boolean; refresh: () => Promise<void> }) {
-  const [snapshot, setSnapshot] = useState<{ items: ListItem[]; completed: { id: string; name: string }[]; syncedAt: string | null }>();
-  const items = snapshot?.items;
-  const [error, setError] = useState("");
-  const [deferred, setDeferred] = useState(false);
-  const { feedback: savedItem, showFeedback, clearFeedback } = useActionFeedback<string>();
+function syncedTitle(item: SyncedItem) {
+  return item.title ?? item.name;
+}
+
+function bySyncedTitle(a: SyncedItem, b: SyncedItem) {
+  return syncedTitle(a).localeCompare(syncedTitle(b), undefined, { sensitivity: "base" }) || a.id.localeCompare(b.id);
+}
+
+function EditItemGroup({ path, item, close }: { path: string; item: SyncedItem; close: () => void }) {
+  const [grouping, setGrouping] = useState<ItemGrouping>();
+  const [group, setGroup] = useState("");
   const [busy, setBusy] = useState(false);
-  async function load() {
-    setBusy(true);
-    setError("");
-    try {
-      setSnapshot(await api<{ items: ListItem[]; completed: { id: string; name: string }[]; syncedAt: string | null }>(path + "/items"));
-    } catch (error) {
-      setError((error as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function change(item: ListItem, aisle: string) {
+  const [error, setError] = useState("");
+  const { feedback: saved, showFeedback, clearFeedback } = useActionFeedback();
+  const url = path + "/items/" + encodeURIComponent(item.id) + "/group";
+
+  useEffect(() => {
+    let active = true;
+    void api<ItemGrouping>(url).then(value => {
+      if (active) { setGrouping(value); setGroup(value.group); }
+    }).catch(error => { if (active) setError(error.message); });
+    return () => { active = false; };
+  }, [url]);
+
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    if (!grouping || busy || group === grouping.group) return;
     setBusy(true);
     setError("");
     clearFeedback();
-    setDeferred(false);
     try {
-      const result = await api<{ applied: boolean }>(path + "/items/" + encodeURIComponent(item.id) + "/aisle", "PUT", { name: item.name, aisle });
-      setDeferred(!result.applied);
-      await load();
-      await refresh();
-      if (result.applied) showFeedback(item.id);
+      const { name, profileId, revision } = grouping;
+      const result = await api<{ revision: string }>(url, "PUT", { name, profileId, revision, group });
+      setGrouping({ ...grouping, group, revision: result.revision });
+      showFeedback(true);
     } catch (error) {
       setError((error as Error).message);
     } finally {
       setBusy(false);
     }
   }
-  useEffect(() => { void load(); }, [path]);
-  useEffect(() => {
-    if (busy) return;
-    let active = true;
-    const timer = window.setInterval(() => {
-      void api<NonNullable<typeof snapshot>>(path + "/items").then(value => {
-        if (active) setSnapshot(value);
-      }).catch(() => undefined);
-    }, 3000);
-    return () => { active = false; window.clearInterval(timer); };
-  }, [path, busy]);
-  return <div className="grid gap-3 rounded-lg bg-background-container-low p-4">
-    <div className="flex flex-wrap items-center justify-between gap-2">
-      <h2 className="font-medium">Open Items</h2>
-      <button className={secondaryButtonClass} disabled={busy} onClick={() => void load()}>Refresh Items</button>
+
+  return <SettingsDialog title="Change Item Group" tabs={[]} selected="" select={() => undefined} close={() => { if (!busy) close(); }}>
+    <div className="grid gap-3">
+      <p className="break-words font-medium">{syncedTitle(item)}</p>
+      {error && <ErrorBanner message={error} />}
+      {!grouping && !error && <PageLoading label="Loading grouping profile…" />}
+      {grouping && <form className="grid gap-4" onSubmit={save}>
+        <p className="text-sm text-on-surface-variant">
+          Applies to all lists using <strong>{grouping.profileName}</strong>. Microsoft To Do titles update when each list syncs.
+        </p>
+        <label className="grid gap-2 text-sm">Group
+          <SelectInput value={group} onChange={value => { setGroup(value); clearFeedback(); }} disabled={busy}>
+            {grouping.groups.map(name => <option key={name}>{name}</option>)}
+          </SelectInput>
+        </label>
+        <div className="flex flex-wrap gap-2">
+          <button className={cn(primaryButtonClass, "min-w-28", saved && successButtonClass)} aria-live="polite" disabled={busy || (!saved && group === grouping.group)}>
+            {busy ? "Saving…" : saved ? "Saved" : "Save Group"}
+          </button>
+          <button type="button" className={secondaryButtonClass} onClick={close} disabled={busy}>Close</button>
+        </div>
+      </form>}
     </div>
-    {grouped && <p className="text-sm text-on-surface-variant">Group corrections are saved for items with the same name on this list.</p>}
+  </SettingsDialog>;
+}
+
+function ListItems({ path, grouped }: { path: string; grouped: boolean }) {
+  const [snapshot, setSnapshot] = useState<ItemSnapshot>();
+  const [error, setError] = useState("");
+  const [editing, setEditing] = useState<SyncedItem>();
+  useEffect(() => {
+    let active = true;
+    async function load() {
+      try {
+        const value = await api<ItemSnapshot>(path + "/items");
+        if (active) { setSnapshot(value); setError(""); }
+      } catch (error) {
+        if (active) setError((error as Error).message);
+      }
+    }
+    void load();
+    const timer = window.setInterval(() => void load(), 3000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [path]);
+
+  const items = [...(snapshot?.items ?? [])].sort(bySyncedTitle);
+  return <div className="grid gap-3 rounded-lg bg-background-container-low p-4">
+    <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+      <h2 className="font-medium">Open Items{snapshot?.syncedAt && " (" + snapshot.items.length + ")"}</h2>
+      {snapshot?.syncedAt && <p className="text-xs text-on-surface-variant">Items synced {new Date(snapshot.syncedAt).toLocaleString()}</p>}
+    </div>
     {error && <ErrorBanner message={error} />}
-    <span role="status" className="sr-only">{savedItem ? "Group correction saved." : ""}</span>
-    {deferred && <p role="status" className="text-sm text-warning">Group correction saved. GraphRelay will apply it on a later sync.</p>}
-    {!items && busy && <p>Loading open items…</p>}
+    {!snapshot && !error && <p>Loading open items…</p>}
     {snapshot?.syncedAt === null && <p>Waiting for the first Microsoft sync.</p>}
-    {snapshot?.syncedAt && <p className="text-xs text-on-surface-variant">Items synced {new Date(snapshot.syncedAt).toLocaleString()}</p>}
-    {snapshot?.syncedAt && items?.length === 0 && <p>No open items.</p>}
-    {!grouped && !!items?.length && <ul className="divide-y divide-outline-variant/30 rounded-lg border border-outline-variant/30 bg-background-container px-3">
-      {[...items].sort((a, b) => a.name.localeCompare(b.name)).map(item => <li key={item.id} className="break-words py-2 text-sm">{item.name}</li>)}
+    {snapshot?.syncedAt && !snapshot.items.length && <p>No open items.</p>}
+    {!!items.length && <ul className="overflow-hidden rounded-lg border border-outline-variant/30 bg-background-container">
+      {items.map((item, index) => {
+        const previous = items[index - 1];
+        const groupBreak = grouped && previous?.title && item.title && previous.aisle !== item.aisle;
+        return <li key={item.id} className={cn("break-words text-sm", previous && "border-t", groupBreak ? "border-outline-variant" : "border-outline-variant/30")}>
+          {grouped
+            ? <button type="button" aria-haspopup="dialog" className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-background-bright focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary" onClick={() => setEditing(item)}>
+              <span className="min-w-0 break-words">{syncedTitle(item)}</span>
+              <ChevronRight size={14} className="shrink-0 text-on-surface-variant" aria-hidden="true" />
+            </button>
+            : <span className="block px-3 py-2">{syncedTitle(item)}</span>}
+        </li>;
+      })}
     </ul>}
-    {grouped && aisles.map(aisle => {
-      const group = items?.filter(item => (aisles.includes(item.aisle) ? item.aisle : "Other") === aisle);
-      if (!group?.length) return null;
-      return <section key={aisle} className="grid gap-2 rounded-lg border border-outline-variant/30 bg-background-container p-3">
-        <h4 className="font-headline font-semibold">{aisle}</h4>
-        <ul className="divide-y divide-outline-variant/30">
-          {group.map(item => <li key={item.id}>
-            <label className="grid grid-cols-[minmax(0,1fr)_9rem] items-center gap-3 py-2 text-sm sm:grid-cols-[minmax(0,1fr)_12rem]">
-              <span className="min-w-0 break-words">{item.name}</span>
-              <SelectInput className={savedItem === item.id ? "border-success" : ""} aria-label={"Group for " + item.name} value={aisles.includes(item.aisle) ? item.aisle : "Other"} onChange={value => void change(item, value)} disabled={busy}>
-                {aisles.map(option => <option key={option} value={option}>{option}</option>)}
-              </SelectInput>
-            </label>
-          </li>)}
-        </ul>
-      </section>;
-    })}
     {snapshot?.syncedAt && <details className="rounded-lg border border-outline-variant/30 bg-background-container px-3 py-2">
       <summary className="cursor-pointer py-1 text-sm font-medium">Completed Items ({snapshot.completed?.length ?? 0})</summary>
       {snapshot.completed?.length ? <ul className="mt-2 divide-y divide-outline-variant/30">
-        {[...snapshot.completed].sort((a, b) => a.name.localeCompare(b.name)).map(item => <li key={item.id} className="break-words py-2 text-sm text-on-surface-variant">{item.name}</li>)}
+        {[...snapshot.completed].sort(bySyncedTitle).map(item => <li key={item.id} className="break-words py-2 text-sm text-on-surface-variant">{syncedTitle(item)}</li>)}
       </ul> : <p className="py-2 text-sm text-on-surface-variant">No completed items.</p>}
     </details>}
+    {editing && grouped && <EditItemGroup path={path} item={editing} close={() => setEditing(undefined)} />}
   </div>;
 }
 
@@ -381,7 +415,7 @@ function runStatus(list: List) {
   return list.lastRun ? "Last run · " + new Date(list.lastRun).toLocaleString() : "No runs yet";
 }
 
-type GroupingProfile = { id: string; name: string; grocery: boolean; usedBy: number; groups: MatchGroup[] };
+type GroupingProfile = { id: string; name: string; grocery: boolean; usedBy: number; revision: string; groups: MatchGroup[] };
 
 function ListSettings({ list, refresh, close }: { list: List; refresh: () => Promise<void>; close: () => void }) {
   const navigate = useNavigate();
@@ -563,7 +597,7 @@ function GroupingProfiles({ onBusy }: { onBusy: (busy: boolean) => void }) {
     if (unnamed) { setActiveId(unnamed.id); setError("Give every group a name before saving."); return; }
     setBusy(true); onBusy(true); setError(""); setNotice("");
     try {
-      const saved = await api<GroupingProfile>("/grouping-profiles/" + selected, "PUT", { name, allMatches: true, groups: groups.map(({ name, matches, prefixes, matchPlurals }) => ({ name, matches, prefixes, matchPlurals })) });
+      const saved = await api<GroupingProfile>("/grouping-profiles/" + selected, "PUT", { name, revision: current?.revision, allMatches: true, groups: groups.map(({ name, matches, prefixes, matchPlurals }) => ({ name, matches, prefixes, matchPlurals })) });
       const values = await api<GroupingProfile[]>("/grouping-profiles");
       setProfiles(values); choose(saved.id, values, activeGroup?.name.trim());
       setNotice("saved");
@@ -899,7 +933,7 @@ function ListDetail({ list, refresh }: { list: List; refresh: () => Promise<void
     {showDuplicates && <SettingsDialog title="Duplicates" tabs={[]} selected="" select={() => undefined} close={() => setShowDuplicates(false)}>
       <DuplicatePreview key={previewRevision} path={path} onRemoved={() => { setItemRevision(value => value + 1); setHistory(undefined); void refresh(); }} />
     </SettingsDialog>}
-    <ItemAisles key={itemRevision} path={path} aisles={list.order} grouped={list.mode !== "off"} refresh={refresh} />
+    <ListItems key={itemRevision} path={path} grouped={list.enrolled && list.mode !== "off" && !list.unenrollPending} />
     {settings && list.enrolled && <ListSettings list={list} refresh={async () => { await refresh(); setItemRevision(value => value + 1); setPreviewRevision(value => value + 1); }} close={() => setSettings(false)} />}
   </Page>;
 }
