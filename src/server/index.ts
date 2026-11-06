@@ -490,6 +490,18 @@ app.put("/api/network", (req, res) => {
   res.json(networkResponse());
 });
 
+app.get("/api/dashboard", (_req, res) => {
+  const enrolled = db.prepare("SELECT id, name FROM lists ORDER BY name COLLATE NOCASE").all() as { id: string; name: string }[];
+  res.json({
+    connected: !!read("username"),
+    lists: enrolled.map(list => ({
+      ...list,
+      openItems: readSnapshot(list.id)?.items.length ?? null,
+      error: !!read("error:" + list.id) || !!read(unenrollKey(list.id)),
+    })),
+    calendar: calendarFeeds.dashboard(),
+  });
+});
 app.use("/api/calendar-feeds", calendarFeeds.admin);
 app.get("/api/microsoft", (_req, res) => { res.json({ account: read("username") ?? null, calendarAccess: !!calendarAccount(), redirectUri: microsoftRedirectUri(), clientId: setup?.clientId ?? (legacySetup ? env.MICROSOFT_CLIENT_ID : null), editable: !!setup }); });
 app.put("/api/microsoft", (req, res) => {

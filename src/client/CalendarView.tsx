@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import FullCalendar from "@fullcalendar/react";
 import type { DatesSetArg, EventClickArg } from "@fullcalendar/core";
 import dayGridPlugin from "@fullcalendar/daygrid";
@@ -8,12 +8,10 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { ErrorBanner } from "./components/Page";
 import { SelectInput, compactSecondaryButtonClass } from "./components/FormControls";
 import { SettingsDialog } from "./components/SettingsDialog";
-import { api } from "./lib/api";
+import { hiddenCalendars, calendarColorsFor, monthKey, saveHiddenCalendars, type Calendar } from "./lib/calendar";
+import { useCalendarSnapshot } from "./hooks/useCalendarSnapshot";
 import "./calendar-view.css";
 
-type Calendar = { id: string; name: string };
-type Event = { id: string; title: string; start: string; end: string; allDay: boolean; calendarId: string; location?: string };
-type Snapshot = { events: Event[]; refreshing: boolean; failed: string[] };
 const plugins = [dayGridPlugin, timeGridPlugin, listPlugin];
 const views = [
   { id: "dayGridMonth", label: "Month" },
@@ -21,23 +19,6 @@ const views = [
   { id: "timeGridDay", label: "Day" },
   { id: "listWeek", label: "Agenda" },
 ];
-const colors = ["#ad2937", "#285aab", "#356c55", "#70419d", "#92581e", "#156b78"];
-const storageKey = "graphrelay:hidden-calendars";
-
-function hiddenCalendars() {
-  try {
-    const value: unknown = JSON.parse(localStorage.getItem(storageKey) ?? "[]");
-    if (Array.isArray(value)) return value.filter((id): id is string => typeof id === "string");
-  } catch {
-    // Calendar filters still work if browser storage is unavailable.
-  }
-  return [];
-}
-
-function monthKey(date: Date) {
-  return date.getFullYear() + "-" + String(date.getMonth() + 1).padStart(2, "0");
-}
-
 export default function CalendarView({ calendars }: { calendars: Calendar[] }) {
   const ref = useRef<FullCalendar>(null);
   const filtersId = useId();
@@ -46,40 +27,15 @@ export default function CalendarView({ calendars }: { calendars: Calendar[] }) {
   const [initialView] = useState(() => window.matchMedia("(max-width: 639px)").matches ? "listWeek" : "dayGridMonth");
   const [view, setView] = useState(initialView);
   const [title, setTitle] = useState("");
-  const [snapshot, setSnapshot] = useState<{ month: string; value: Snapshot }>();
-  const [error, setError] = useState("");
   const [detail, setDetail] = useState<EventClickArg["event"]>();
   const selected = calendars.filter(calendar => !hidden.includes(calendar.id));
-  const calendarColors = useMemo(() => new Map(calendars.map((calendar, index) => [calendar.id, colors[index % colors.length]])), [calendars]);
-  const query = new URLSearchParams({ month });
-  for (const calendar of selected) query.append("calendar", calendar.id);
-  const path = selected.length ? "/calendar-feeds/view?" + query : null;
-
-  useEffect(() => {
-    if (!path) return;
-    let active = true;
-    let timer: ReturnType<typeof setTimeout>;
-    async function load() {
-      let interval = 30_000;
-      try {
-        const value = await api<Snapshot>(path!);
-        if (!active) return;
-        setSnapshot({ month, value });
-        setError("");
-        if (value.refreshing) interval = 1000;
-      } catch (error) {
-        if (active) setError((error as Error).message);
-      }
-      if (active) timer = setTimeout(load, interval);
-    }
-    void load();
-    return () => { active = false; clearTimeout(timer); };
-  }, [path, month]);
+  const calendarColors = useMemo(() => calendarColorsFor(calendars), [calendars]);
+  const { snapshot: current, error } = useCalendarSnapshot(month, selected);
 
   function toggle(id: string) {
     const next = hidden.includes(id) ? hidden.filter(value => value !== id) : [...hidden, id];
     setHidden(next);
-    try { localStorage.setItem(storageKey, JSON.stringify(next)); } catch { /* Optional browser preference. */ }
+    saveHiddenCalendars(next);
   }
 
   function datesSet(info: DatesSetArg) {
@@ -88,7 +44,6 @@ export default function CalendarView({ calendars }: { calendars: Calendar[] }) {
     setView(info.view.type);
   }
 
-  const current = snapshot?.month === month ? snapshot.value : undefined;
   const events = (current?.events ?? []).filter(event => !hidden.includes(event.calendarId)).map(event => ({
     ...event,
     id: JSON.stringify([event.calendarId, event.id]),

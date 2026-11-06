@@ -406,6 +406,16 @@ export function createCalendarFeeds(db: Database.Database, options: {
     res.type("text/calendar; charset=utf-8").send(feed.ics);
   });
 
+  function dashboard() {
+    const account = options.account();
+    return {
+      connected: !!account,
+      calendars: account ? localCalendars(account) : [],
+      error: account ? directoryErrors.get(account) : undefined,
+      failedFeeds: account ? feeds(account).filter(feed => feed.error).map(feed => ({ id: feed.id, name: feed.name })) : [],
+    };
+  }
+
   schedule();
-  return { admin, subscription, refresh };
+  return { admin, subscription, refresh, dashboard };
 }

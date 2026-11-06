@@ -12,6 +12,7 @@ import { dangerButtonClass, SectionCard, SelectInput, SettingRow, SettingToggle,
 
 import { api, sessionExpiredEvent, SessionExpiredError } from "./lib/api";
 import CalendarFeeds, { CalendarSettings } from "./CalendarFeeds";
+import Dashboard from "./Dashboard";
 import { SettingsDialog } from "./components/SettingsDialog";
 
 type Session = { configured: boolean } & ({ signedIn: false } | { signedIn: true; build: BuildInfo });
@@ -1012,7 +1013,7 @@ export default function App() {
   if (!session.signedIn) return <Login onLogin={refresh} />;
   return <Layout build={session.build} user={{ username: "Administrator", displayName: "Administrator" }} onLogout={logout}>
     <Routes>
-      <Route path="/dashboard" element={<Page><PageHeader title="Dashboard" /><SectionCard title="Microsoft Account Companion" description="Manage Microsoft To Do lists and calendar subscriptions."><Link className={primaryButtonClass} to="/settings">Microsoft Connection</Link></SectionCard></Page>} />
+      <Route path="/dashboard" element={<Dashboard />} />
       <Route path="/todo/*" element={<ToDo />} />
       <Route path="/calendar" element={<CalendarFeeds />} />
       <Route path="/settings" element={<Settings build={session.build} />} />

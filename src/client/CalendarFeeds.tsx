@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState, type FormEvent } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { ErrorBanner, Page, PageHeader, PageLoading } from "./components/Page";
 import { SectionCard, SelectInput, TextInput, compactSecondaryButtonClass, dangerButtonClass, primaryButtonClass, secondaryButtonClass } from "./components/FormControls";
 import { SettingsDialog } from "./components/SettingsDialog";
@@ -231,7 +231,7 @@ function FeedLink({ feed, settings, busy, onEdit }: {
       onEdit(true);
     }
   }
-  return <article className="grid min-w-0 gap-2 rounded-lg border border-outline-variant/30 px-3 py-2.5 sm:px-4">
+  return <article id={"feed-" + feed.id} className="grid min-w-0 gap-2 rounded-lg border border-outline-variant/30 px-3 py-2.5 sm:px-4 target:border-primary/60">
     <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2">
       <div className="min-w-0 flex-1 basis-64">
         <h3 className="break-words text-sm font-semibold">{feed.name}</h3>
@@ -255,11 +255,16 @@ function FeedLink({ feed, settings, busy, onEdit }: {
 
 export default function CalendarFeeds() {
   const [params, setParams] = useSearchParams();
+  const { hash } = useLocation();
   const feedsTab = params.get("tab") === "feeds";
   const [status, setStatus] = useState<CalendarStatus>();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [editor, setEditor] = useState<{ feed?: Feed; selectUrl?: boolean }>();
+  const showLinkedFeed = feedsTab && status?.feeds.some(feed => hash === "#feed-" + feed.id);
+  useEffect(() => {
+    if (showLinkedFeed) document.getElementById(hash.slice(1))?.scrollIntoView({ block: "nearest" });
+  }, [hash, showLinkedFeed]);
   useEffect(() => {
     let active = true;
     const load = () => api<CalendarStatus>("/calendar-feeds").then(value => {
