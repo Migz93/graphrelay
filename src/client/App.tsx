@@ -10,7 +10,7 @@ import Layout, { type BuildInfo } from "./components/Layout";
 import { ErrorBanner, Page, PageHeader, PageLoading } from "./components/Page";
 import { dangerButtonClass, SectionCard, SelectInput, SettingRow, SettingToggle, TextInput, primaryButtonClass, secondaryButtonClass } from "./components/FormControls";
 
-import { api } from "./lib/api";
+import { api, sessionExpiredEvent, SessionExpiredError } from "./lib/api";
 import CalendarFeeds, { CalendarSettings } from "./CalendarFeeds";
 import { SettingsDialog } from "./components/SettingsDialog";
 
@@ -995,12 +995,22 @@ export default function App() {
   const [session, setSession] = useState<Session>();
   const [error, setError] = useState("");
   const refresh = () => void api<Session>("/session").then(setSession).catch(error => setError(error.message));
-  useEffect(refresh, []);
+  useEffect(() => {
+    const expire = () => setSession(current => current?.signedIn ? { configured: true, signedIn: false } : current);
+    window.addEventListener(sessionExpiredEvent, expire);
+    refresh();
+    return () => window.removeEventListener(sessionExpiredEvent, expire);
+  }, []);
+  function logout() {
+    void api("/logout", "POST").then(refresh).catch(error => {
+      if (!(error instanceof SessionExpiredError)) setError(error.message);
+    });
+  }
   if (error) return <Page><ErrorBanner message={error} /></Page>;
   if (!session) return <PageLoading label="Loading GraphRelay…" />;
   if (!session.configured) return <Login firstRun onLogin={refresh} />;
   if (!session.signedIn) return <Login onLogin={refresh} />;
-  return <Layout build={session.build} user={{ username: "Administrator", displayName: "Administrator" }} onLogout={() => void api("/logout", "POST").then(refresh).catch(error => setError(error.message))}>
+  return <Layout build={session.build} user={{ username: "Administrator", displayName: "Administrator" }} onLogout={logout}>
     <Routes>
       <Route path="/dashboard" element={<Page><PageHeader title="Dashboard" /><SectionCard title="Microsoft Account Companion" description="Manage Microsoft To Do lists and calendar subscriptions."><Link className={primaryButtonClass} to="/settings">Microsoft Connection</Link></SectionCard></Page>} />
       <Route path="/todo/*" element={<ToDo />} />
