@@ -116,7 +116,38 @@ GraphRelay was developed with Codex assistance and hands-on direction from its m
 
 ## Credits And Inspiration
 
-GraphRelay shares design and development conventions with [Hubarr](https://github.com/Migz93/hubarr), [ShelfBridge](https://github.com/Migz93/shelfbridge), and [Pacearr](https://github.com/Migz93/pacearr).
+GraphRelay shares design and development conventions with these projects.
+
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://github.com/Migz93/hubarr">Hubarr</a>
+    </td>
+    <td align="center">
+      <a href="https://github.com/Migz93/shelfbridge">ShelfBridge</a>
+    </td>
+    <td align="center">
+      <a href="https://github.com/Migz93/pacearr">Pacearr</a>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="https://github.com/Migz93/hubarr">
+        <img src="https://raw.githubusercontent.com/Migz93/hubarr/refs/heads/main/public/logo.png" alt="Hubarr logo" width="72" height="72" />
+      </a>
+    </td>
+    <td align="center">
+      <a href="https://github.com/Migz93/shelfbridge">
+        <img src="https://raw.githubusercontent.com/Migz93/shelfbridge/refs/heads/main/public/logo.webp" alt="ShelfBridge logo" width="72" height="72" />
+      </a>
+    </td>
+    <td align="center">
+      <a href="https://github.com/Migz93/pacearr">
+        <img src="https://raw.githubusercontent.com/Migz93/pacearr/refs/heads/main/public/logo.png" alt="Pacearr logo" width="72" height="72" />
+      </a>
+    </td>
+  </tr>
+</table>
 
 [coffee]: https://www.buymeacoffee.com/Migz93
 [coffee-shield]: https://img.shields.io/badge/buy%20me%20a%20coffee-donate-yellow.svg?style=for-the-badge
