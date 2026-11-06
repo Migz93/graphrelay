@@ -2,6 +2,7 @@ import pluralize from "pluralize";
 import { profileMatcher } from "./profile-matcher.js";
 import express from "express";
 import session from "express-session";
+import { SqliteSessionStore } from "./session-store.js";
 import Database from "better-sqlite3";
 import { ConfidentialClientApplication, CryptoProvider } from "@azure/msal-node";
 import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
@@ -406,6 +407,7 @@ app.post(duplicateRemovalPath, express.json({ limit: "512kb" }));
 app.use(express.json({ limit: "16kb" }));
 app.use("/calendar-feeds", calendarFeeds.subscription);
 app.use(session({
+  store: new SqliteSessionStore(db, { encrypt, decrypt }),
   secret: createHash("sha256").update(key).update("session").digest("hex"),
   resave: false,
   saveUninitialized: false,

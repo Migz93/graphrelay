@@ -10,7 +10,7 @@ Keep the instance private until first-run setup is complete. Open GraphRelay and
 
 For a reverse proxy, open **Settings → General → Network**, set **Public URL** to the HTTPS address you use in your browser, and enable **Trust Proxy** for a single trusted proxy. The proxy should replace forwarded headers and send `X-Forwarded-Proto: https`. Save, then add the displayed **Microsoft Redirect URI** as a **Web** redirect URI in Entra. Start Microsoft sign-in from the configured address. The saved settings take effect immediately and override the `PUBLIC_URL` and `TRUST_PROXY` environment defaults.
 
-GraphRelay encrypts the Microsoft configuration and token cache with a key stored under /config and stores a salted hash of the administrator password. Preserve the whole /config volume across restarts and keep it private. The volume must be writable by UID 1000. Existing environment-configured instances can still use their original settings.
+GraphRelay encrypts the Microsoft configuration and token cache with a key stored under /config and stores a salted hash of the administrator password. Preserve the whole /config volume across restarts and keep it private. The volume must be writable by UID 1000. Existing environment-configured instances can still use their original settings. Browser sign-in sessions are stored in the database so they survive restarts with the same config volume and session key. Sessions expire after seven days of inactivity.
 
 ## Test the prototype
 
