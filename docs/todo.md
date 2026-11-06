@@ -26,4 +26,4 @@ Grouping prefixes added by GraphRelay are excluded from the duplicate key. Match
 
 ## Unenrollment
 
-In **List Settings → General**, select **Unenroll List** and confirm. GraphRelay removes its tracked prefixes from open and completed items before ending automation. If restoration fails partway, list automation pauses until you retry. Successful unenrollment removes the list’s local settings and title tracking. The shared profile stays available to other lists.
+In **List Settings → General**, select **Unenroll List** beside **Save List Settings**, then select **Are You Sure?** to confirm. GraphRelay removes its tracked prefixes from open and completed items before ending automation. If restoration fails partway, list automation pauses until you retry. Successful unenrollment removes the list’s local settings and title tracking. The shared profile stays available to other lists.

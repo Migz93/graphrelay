@@ -470,8 +470,14 @@ function ListSettings({ list, refresh, close }: { list: List; refresh: () => Pro
     }
   }
 
+  function selectTab(value: string) {
+    if (busy || value === tab) return;
+    setConfirmUnenroll(false);
+    setTab(value);
+  }
+
   const blocked = busy || !!list.unenrollPending || confirmUnenroll;
-  return <SettingsDialog title={list.displayName + " Settings"} tabs={["General", "Grouping"]} selected={tab} select={value => { if (!busy) setTab(value); }} close={() => { if (!busy) close(); }}>
+  return <SettingsDialog title={list.displayName + " Settings"} tabs={["General", "Grouping"]} selected={tab} select={selectTab} close={() => { if (!busy) close(); }}>
     <div className="grid gap-4">
       {error && <ErrorBanner message={error} />}
       {list.unenrollPending && <p className="text-sm text-warning">Automatic runs are paused while unenrollment is unfinished. Use General to retry.</p>}
@@ -504,20 +510,21 @@ function ListSettings({ list, refresh, close }: { list: List; refresh: () => Pro
             </>}
           </>}
         </fieldset>
-        <div><button className={cn(primaryButtonClass, "min-w-40", saved && successButtonClass)} aria-live="polite" disabled={blocked || !profiles || !polling}>
-          {busy && !confirmUnenroll ? "Saving…" : saved ? "Saved" : "Save List Settings"}
-        </button></div>
+        <div className="flex flex-wrap gap-2">
+          <button className={cn(primaryButtonClass, "min-w-40", saved && successButtonClass)} aria-live="polite" disabled={blocked || !profiles || !polling}>
+            {busy && !confirmUnenroll ? "Saving…" : saved ? "Saved" : "Save List Settings"}
+          </button>
+          {tab === "General" && <>
+            <button type="button" className={dangerButtonClass} aria-live="polite" disabled={busy} onClick={() => {
+              if (confirmUnenroll) void unenroll();
+              else { clearFeedback(); setConfirmUnenroll(true); }
+            }}>
+              {confirmUnenroll ? busy ? "Unenrolling…" : "Are You Sure?" : "Unenroll List"}
+            </button>
+            {confirmUnenroll && <button type="button" className={secondaryButtonClass} disabled={busy} onClick={() => setConfirmUnenroll(false)}>Cancel</button>}
+          </>}
+        </div>
       </form>
-      {tab === "General" && <div className="grid gap-3 border-t border-outline-variant/30 pt-4">
-        <p className="text-sm text-on-surface-variant">Unenrolling stops automation and removes GraphRelay prefixes from open and completed items. The list will still be cached on the default schedule.</p>
-        {confirmUnenroll ? <>
-          <p className="text-sm">Unenroll {list.displayName} and remove its prefixes?</p>
-          <div className="flex flex-wrap gap-2">
-            <button className={dangerButtonClass} disabled={busy} onClick={() => void unenroll()}>{busy ? "Unenrolling…" : "Confirm Unenrollment"}</button>
-            <button className={secondaryButtonClass} disabled={busy} onClick={() => setConfirmUnenroll(false)}>Cancel</button>
-          </div>
-        </> : <div><button className={dangerButtonClass} disabled={busy} onClick={() => { clearFeedback(); setConfirmUnenroll(true); }}>Unenroll List</button></div>}
-      </div>}
     </div>
   </SettingsDialog>;
 }
