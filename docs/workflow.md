@@ -41,7 +41,7 @@ CI runs type checks, tests and a production build. PRs compile the production im
 
 ## Release Notes
 
-Summarize user-visible changes, upgrade steps, fixes, security or maintenance, and Docker tags where applicable. Use the draft as a starting point and account for changes that landed directly on `main`.
+Summarize user-visible changes, upgrade steps, fixes, security or maintenance, and Docker tags where applicable. PR titles beginning with feat, fix, docs, and ci automatically receive the matching release label, including scoped titles such as fix(calendar). The autolabeler runs on PR events with label-write permission. Release drafts update on pushes to main. Use the draft as a starting point and account for changes that landed directly on `main`.
 
 ## Security Findings
 
