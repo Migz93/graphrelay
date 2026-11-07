@@ -90,8 +90,9 @@ export default function CalendarView({ calendars }: { calendars: Calendar[] }) {
       <FullCalendar ref={ref} plugins={plugins} initialView={initialView} headerToolbar={false} firstDay={1} height="auto"
         datesSet={datesSet} dayMaxEvents={3} nowIndicator events={events} eventInteractive
         eventClass="graphrelay-calendar-event" eventInnerClass="graphrelay-calendar-event-inner"
-        eventTitleClass="graphrelay-calendar-event-title" listItemEventTitleClass="graphrelay-calendar-event-title"
-        listItemEventClass="graphrelay-calendar-event" dayHeaderInnerClass="graphrelay-calendar-day-header" eventClick={info => setDetail(info.event)} />
+        eventTitleClass="graphrelay-calendar-event-title" listItemEventTitleClass="graphrelay-calendar-list-title"
+        listItemEventClass="graphrelay-calendar-event" dayHeaderInnerClass="graphrelay-calendar-day-header"
+        eventClick={info => setDetail(info.event)} />
     </section>
     {detail && <SettingsDialog title={detail.title} tabs={[]} selected="" select={() => undefined} close={() => setDetail(undefined)}>
       <div className="grid gap-2 text-sm">

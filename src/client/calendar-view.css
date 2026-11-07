@@ -18,6 +18,7 @@
 .graphrelay-calendar-event { cursor: pointer; }
 .graphrelay-calendar-event:focus-visible { outline: 2px solid var(--color-primary); }
 .graphrelay-calendar-event-title { overflow-wrap: anywhere; }
+.graphrelay-calendar .graphrelay-calendar-list-title { white-space: normal; overflow-wrap: anywhere; }
 .graphrelay-calendar-event-inner { overflow: hidden; }
 .graphrelay-calendar-day-header { max-width: 100%; }
 
