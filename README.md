@@ -57,24 +57,23 @@ Tick the calendars you want to see together, or switch to **Feeds** to manage yo
 
 ### Docker
 
-Build from the checkout while GraphRelay is in early development.
+Use the latest stable image, or pin a release such as `v1.0.0`.
 
 ```bash
-docker build -t graphrelay:local .
 docker run -d \
   --name graphrelay \
   --network bridge \
   -p 127.0.0.1:9304:9304 \
   -v graphrelay-config:/config \
   --restart unless-stopped \
-  graphrelay:local
+  ghcr.io/migz93/graphrelay:latest
 ```
 
 Open `http://localhost:9304` on the Docker host or use an SSH tunnel from your browser.
 
 ### Docker Compose
 
-The [Compose file](docker-compose.yml) uses the development image from GitHub. If you built the image yourself using the command above, set the service image to `graphrelay:local`.
+The [Compose file](docker-compose.yml) uses the latest stable image from GitHub. Use the `develop` image tag to try changes before the next stable release.
 
 ```bash
 sudo install -d -m 0700 -o 1000 -g 1000 /opt/graphrelay
@@ -102,9 +101,9 @@ For groups to appear together in Microsoft To Do, set the list to **Alphabetical
 
 Anyone who has the subscription link and can reach GraphRelay can read the events in that feed. Your calendar app decides how often it checks the link for updates. [Calendar](docs/calendar.md)
 
-### Early Development
+### Updates
 
-GraphRelay is in early development. Preserve your configuration volume when updating.
+Preserve your configuration volume when updating so GraphRelay retains your connection, settings, lists and feeds.
 
 ## Contributing
 

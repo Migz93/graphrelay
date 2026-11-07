@@ -1,6 +1,6 @@
 services:
   graphrelay:
-    image: ghcr.io/migz93/graphrelay:develop
+    image: ghcr.io/migz93/graphrelay:latest
     restart: unless-stopped
     ports:
       - "127.0.0.1:9304:9304"

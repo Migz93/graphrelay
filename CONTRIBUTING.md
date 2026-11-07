@@ -4,7 +4,7 @@
 
 ## Workflow
 
-GraphRelay’s maintainers work directly on `main` during early development. Target `main` for external contributions. See the [workflow reference](docs/workflow.md) before opening a PR or tagging a release.
+Start a task branch from `develop` and target `develop` for contributions. `main` contains stable releases. See the [workflow reference](docs/workflow.md) before opening a PR or tagging a release.
 
 ## Pull Requests
 

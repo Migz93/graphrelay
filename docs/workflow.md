@@ -4,13 +4,13 @@
 
 ## Branches And Checkouts
 
-Use `main` as the default and active development branch during early development. The maintainer and authorized collaborators may commit and push directly to `main`. The `develop` branch is reserved for the later transition. Adopt the sibling apps’ PR workflow when the maintainer explicitly switches GraphRelay to it.
+Use develop as the integration branch and main for stable releases. Start task branches from an up-to-date develop checkout and open PRs back to develop. Use feat/, fix/, chore/, ci/ or docs/ prefixes. Reserve PRs into main for an authorized release. The maintainer selects develop as the repository default after the v1.0.0 release.
 
-For the maintained SSH workflow, check the server and local branches and dirty state, then fast-forward `main` on both checkouts. Edit and run app checks as `node` in the GraphRelay devcontainer. Run authenticated Git commands and Docker builds on the host. Commit and push from the host, then fast-forward `main` on the client. Keep machine-specific commands in the private runbook or ignored `LOCAL.md`.
+For the maintained SSH workflow, check the server and local branches and dirty state, then fast-forward the intended branch on both checkouts. Edit and run app checks as node in the GraphRelay devcontainer. Run authenticated Git commands and Docker builds on the host. Commit and push the task branch from the host, then fast-forward the same branch on the client. Keep machine-specific commands in LOCAL.md.
 
 ## GitHub CLI Usage
 
-Check the target branch and repository before running commands. Use `gh pr view`, `gh pr checks` and `gh run view` to inspect work. When a PR is requested, target `main` during early development. Write multiline GitHub bodies in a file and pass `--body-file`.
+Check the target branch and repository before running commands. Use `gh pr view`, `gh pr checks` and `gh run view` to inspect work. Target `develop` for normal work and `main` for an authorized release. Write multiline GitHub bodies in a file and pass `--body-file`.
 
 ## AI Sign-Off For GitHub Text
 
@@ -35,9 +35,9 @@ CI runs type checks, tests and a production build. PRs compile the production im
 ## Release Process
 
 1. Prepare the agreed version bump to `package.json` and `package-lock.json` when the maintainer requests a release.
-2. Check startup, migrations, persistent data, auth and Microsoft integrations on the intended release commit.
+2. Run type checks, tests, the production build and disposable Docker checks. Promote the reviewed release changes from develop to main, then check startup, migrations, persistent data, auth and Microsoft integrations on the intended release commit.
 3. Once the maintainer approves tagging, tag the intended commit in `main` as `vX.Y.Z`. The workflow publishes the versioned AMD64 and ARM64 images. Stable tags also update `latest`.
-4. Review the Release Drafter draft and publish the release after confirming the expected images.
+4. Review the Release Drafter draft and publish the release after confirming the expected images. Synchronize develop with the released main commit through a fast-forward where possible or a reviewed PR when the histories have diverged.
 
 ## Release Notes
 

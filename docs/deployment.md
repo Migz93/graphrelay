@@ -8,7 +8,7 @@ A push to `develop` publishes `ghcr.io/migz93/graphrelay:develop` and a short co
 
 ## Running It
 
-The checked-in [Compose file](../docker-compose.yml) uses the develop image, a loopback port mapping and a bind mount at `/opt/graphrelay`. It reads an optional `.env` file.
+The checked-in [Compose file](../docker-compose.yml) uses the latest stable image, a loopback port mapping and a bind mount at `/opt/graphrelay`. It reads an optional `.env` file.
 
 ```bash
 sudo install -d -m 0700 -o 1000 -g 1000 /opt/graphrelay

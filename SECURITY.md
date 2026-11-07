@@ -16,7 +16,7 @@ Relevant reports include authentication, authorization, Microsoft credential han
 
 ## Supported Versions
 
-GraphRelay is in early development. Security fixes are handled on the current development line.
+Security fixes are provided for the latest stable release and the current develop branch. Use the latest stable image or a supported version tag.
 
 ## Security Scanning
 

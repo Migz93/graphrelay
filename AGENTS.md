@@ -54,11 +54,11 @@ Use the [manual smoke procedure](TESTING.md#manual-smoke-test). Build a uniquely
 
 ### Before Starting Any Work
 
-Verify the current branch and state before edits. GraphRelay’s maintainer and authorized collaborators work directly on `main` during early development. Synchronize that branch through GitHub and use fast-forward updates. Preserve unrelated work and branches.
+Verify branches and dirty state on both checkouts before edits. Start a task branch from an up-to-date `develop`. Synchronize through GitHub and use fast-forward updates. Preserve unrelated work and branches.
 
 ### Review And Release
 
-PRs are optional during early development and target `main` when used. Review the current diff and follow the owner’s requested review gates. Version bumps, tags and releases require the owner’s direction. The sibling apps’ `develop` and PR workflow starts only when the owner chooses to adopt it. [Workflow](docs/workflow.md)
+Feature, fix, documentation and dependency PRs target `develop`. `main` contains stable releases. Review the current diff, pass the required checks and follow the owner’s requested review gates before merging. Version bumps, release promotion to `main`, tags and releases require the owner’s direction. [Workflow](docs/workflow.md)
 
 ### Close Out Work
 
