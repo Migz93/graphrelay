@@ -6,6 +6,10 @@
 
 Open **Calendar → Events** to browse Month, Week, Day or Agenda views. Tick the calendars you want to see. The selection is remembered in that browser and is also used for upcoming events on the dashboard. The Events view reads a local snapshot and queues a background refresh when needed. [Sync](sync.md)
 
+## Calendar Display Dependencies
+
+The Events view uses FullCalendar React v7. Day Grid, Time Grid, Agenda and the Classic theme come from `@fullcalendar/react` entrypoints. Import the skeleton, theme and palette styles explicitly, then apply GraphRelay's colours in `calendar-view.css`. The `temporal-polyfill` peer dependency is declared directly. Calendar navigation uses `CalendarRef`, event details use the v7 event API, and interactive events provide keyboard activation through FullCalendar.
+
 ## Subscription Feeds
 
 1. Open **Calendar → Feeds → Create Feed**.

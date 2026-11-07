@@ -1,9 +1,12 @@
 import { useId, useMemo, useRef, useState } from "react";
-import FullCalendar from "@fullcalendar/react";
-import type { DatesSetArg, EventClickArg } from "@fullcalendar/core";
-import dayGridPlugin from "@fullcalendar/daygrid";
-import timeGridPlugin from "@fullcalendar/timegrid";
-import listPlugin from "@fullcalendar/list";
+import FullCalendar, { type CalendarRef, type DatesSetInfo, type EventClickInfo } from "@fullcalendar/react";
+import dayGridPlugin from "@fullcalendar/react/daygrid";
+import timeGridPlugin from "@fullcalendar/react/timegrid";
+import listPlugin from "@fullcalendar/react/list";
+import classicTheme from "@fullcalendar/react/themes/classic";
+import "@fullcalendar/react/skeleton.css";
+import "@fullcalendar/react/themes/classic/theme.css";
+import "@fullcalendar/react/themes/classic/palette.css";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { ErrorBanner } from "./components/Page";
 import { SelectInput, compactSecondaryButtonClass } from "./components/FormControls";
@@ -12,7 +15,7 @@ import { hiddenCalendars, calendarColorsFor, monthKey, saveHiddenCalendars, type
 import { useCalendarSnapshot } from "./hooks/useCalendarSnapshot";
 import "./calendar-view.css";
 
-const plugins = [dayGridPlugin, timeGridPlugin, listPlugin];
+const plugins = [classicTheme, dayGridPlugin, timeGridPlugin, listPlugin];
 const views = [
   { id: "dayGridMonth", label: "Month" },
   { id: "timeGridWeek", label: "Week" },
@@ -20,14 +23,14 @@ const views = [
   { id: "listWeek", label: "Agenda" },
 ];
 export default function CalendarView({ calendars }: { calendars: Calendar[] }) {
-  const ref = useRef<FullCalendar>(null);
+  const ref = useRef<CalendarRef>(null);
   const filtersId = useId();
   const [hidden, setHidden] = useState(hiddenCalendars);
   const [month, setMonth] = useState(() => monthKey(new Date()));
   const [initialView] = useState(() => window.matchMedia("(max-width: 639px)").matches ? "listWeek" : "dayGridMonth");
   const [view, setView] = useState(initialView);
   const [title, setTitle] = useState("");
-  const [detail, setDetail] = useState<EventClickArg["event"]>();
+  const [detail, setDetail] = useState<EventClickInfo["event"]>();
   const selected = calendars.filter(calendar => !hidden.includes(calendar.id));
   const calendarColors = useMemo(() => calendarColorsFor(calendars), [calendars]);
   const { snapshot: current, error } = useCalendarSnapshot(month, selected);
@@ -38,7 +41,7 @@ export default function CalendarView({ calendars }: { calendars: Calendar[] }) {
     saveHiddenCalendars(next);
   }
 
-  function datesSet(info: DatesSetArg) {
+  function datesSet(info: DatesSetInfo) {
     setMonth(monthKey(info.view.calendar.getDate()));
     setTitle(info.view.title);
     setView(info.view.type);
@@ -47,8 +50,8 @@ export default function CalendarView({ calendars }: { calendars: Calendar[] }) {
   const events = (current?.events ?? []).filter(event => !hidden.includes(event.calendarId)).map(event => ({
     ...event,
     id: JSON.stringify([event.calendarId, event.id]),
-    backgroundColor: calendarColors.get(event.calendarId),
-    borderColor: calendarColors.get(event.calendarId),
+    color: calendarColors.get(event.calendarId),
+    contrastColor: "#fff",
     extendedProps: { calendarId: event.calendarId, location: event.location },
   }));
   const dateFormat = detail?.allDay
@@ -85,12 +88,10 @@ export default function CalendarView({ calendars }: { calendars: Calendar[] }) {
       {!selected.length && <p className="mb-3 text-sm text-on-surface-variant">Choose calendars to show their events.</p>}
       {!!selected.length && (!current || current.refreshing) && <p role="status" className="mb-3 text-sm text-on-surface-variant">Refreshing calendar events…</p>}
       <FullCalendar ref={ref} plugins={plugins} initialView={initialView} headerToolbar={false} firstDay={1} height="auto"
-        datesSet={datesSet} dayMaxEvents={3} nowIndicator events={events} eventClick={info => setDetail(info.event)}
-        eventDidMount={({ el, event }) => {
-          el.tabIndex = 0;
-          el.setAttribute("role", "button");
-          el.onkeydown = key => { if (key.key === "Enter" || key.key === " ") { key.preventDefault(); setDetail(event); } };
-        }} />
+        datesSet={datesSet} dayMaxEvents={3} nowIndicator events={events} eventInteractive
+        eventClass="graphrelay-calendar-event" eventInnerClass="graphrelay-calendar-event-inner"
+        eventTitleClass="graphrelay-calendar-event-title" listItemEventTitleClass="graphrelay-calendar-event-title"
+        listItemEventClass="graphrelay-calendar-event" dayHeaderInnerClass="graphrelay-calendar-day-header" eventClick={info => setDetail(info.event)} />
     </section>
     {detail && <SettingsDialog title={detail.title} tabs={[]} selected="" select={() => undefined} close={() => setDetail(undefined)}>
       <div className="grid gap-2 text-sm">

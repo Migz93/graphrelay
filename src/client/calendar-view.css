@@ -1,22 +1,26 @@
-.graphrelay-calendar .fc {
-  --fc-border-color: var(--color-outline-variant);
-  --fc-page-bg-color: var(--color-background-container);
-  --fc-neutral-bg-color: var(--color-background-container-high);
-  --fc-list-event-hover-bg-color: var(--color-background-bright);
-  --fc-today-bg-color: rgba(229, 9, 20, 0.10);
-  --fc-now-indicator-color: var(--color-primary);
-  --fc-event-text-color: #fff;
+.graphrelay-calendar {
+  --fc-classic-border: var(--color-outline-variant);
+  --fc-classic-strong-border: var(--color-outline-variant);
+  --fc-classic-background: var(--color-background-container);
+  --fc-classic-foreground: var(--color-on-surface);
+  --fc-classic-muted: var(--color-background-container-high);
+  --fc-classic-strong: var(--color-background-bright);
+  --fc-classic-faint: var(--color-background-container-low);
+  --fc-classic-muted-foreground: var(--color-on-surface-variant);
+  --fc-classic-faint-foreground: var(--color-on-surface-variant);
+  --fc-classic-today: rgba(229, 9, 20, 0.10);
+  --fc-classic-now: var(--color-primary);
+  --fc-classic-primary: var(--color-primary);
+  --fc-classic-primary-foreground: #fff;
   font-size: 0.875rem;
 }
 
-.graphrelay-calendar .fc-event[role="button"] { cursor: pointer; }
-.graphrelay-calendar .fc-event:focus-visible { outline: 2px solid var(--color-primary); }
-.graphrelay-calendar .fc-list-event-title { overflow-wrap: anywhere; }
-.graphrelay-calendar .fc-timegrid-event .fc-event-main { overflow: hidden; }
-.graphrelay-calendar .fc-col-header-cell-cushion { max-width: 100%; }
+.graphrelay-calendar-event { cursor: pointer; }
+.graphrelay-calendar-event:focus-visible { outline: 2px solid var(--color-primary); }
+.graphrelay-calendar-event-title { overflow-wrap: anywhere; }
+.graphrelay-calendar-event-inner { overflow: hidden; }
+.graphrelay-calendar-day-header { max-width: 100%; }
 
 @media (max-width: 639px) {
-  .graphrelay-calendar .fc { font-size: 0.75rem; }
-  .graphrelay-calendar .fc .fc-list-table td,
-  .graphrelay-calendar .fc .fc-list-table th { padding: 0.4rem; }
+  .graphrelay-calendar { font-size: 0.75rem; }
 }
