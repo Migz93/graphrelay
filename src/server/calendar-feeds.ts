@@ -156,7 +156,7 @@ export function createCalendarFeeds(db: Database.Database, options: {
     return options.collection<CalendarEvent>(calendarPath(calendar.id, calendar.groupId) + "/calendarView?" + query);
   }
 
-  admin.use("/view", createCalendarView(db, {
+  const calendarView = createCalendarView(db, {
     account: options.account,
     calendars: localCalendars,
     intervalMinutes: () => defaults().intervalMinutes,
@@ -172,7 +172,8 @@ export function createCalendarFeeds(db: Database.Database, options: {
       }
       return result;
     },
-  }));
+  });
+  admin.use("/view", calendarView.router);
 
   async function discover(account: string) {
     try {
@@ -252,7 +253,7 @@ export function createCalendarFeeds(db: Database.Database, options: {
     if (!account || refreshes.has(account)) return;
     const current = defaults();
     const due = feeds(account).filter(feed => !refreshingFeeds.has(feed.token))
-      .reduce((earliest, feed) => Math.min(earliest, feedDue(feed, current)), directoryDue(account, current));
+      .reduce((earliest, feed) => Math.min(earliest, feedDue(feed, current)), Math.min(directoryDue(account, current), calendarView.nextDue(account)));
     timer = setTimeout(() => void refresh(false), Math.max(0, due - Date.now())).unref();
   }
 
@@ -270,6 +271,7 @@ export function createCalendarFeeds(db: Database.Database, options: {
         const current = defaults();
         if (feed && (force || feedDue(feed, current) <= Date.now())) await refreshFeed(feed, current, known);
       }
+      await calendarView.refresh(force);
     })().finally(() => {
       refreshes.delete(account);
       schedule();

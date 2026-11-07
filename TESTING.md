@@ -45,6 +45,7 @@ Use the disposable container’s bridge address and port when reachable from the
 | [grouping-store.test.ts](tests/grouping-store.test.ts) | JSON round trips, profile portability, stable IDs and filenames |
 | [duplicates.test.ts](tests/duplicates.test.ts) | Duplicate keys and keeper selection |
 | [duplicate-cleanup.test.ts](tests/duplicate-cleanup.test.ts) | HTTP cleanup, request sizes, protected copies, progress recovery and totals |
+| [calendar-view.test.ts](tests/calendar-view.test.ts) | Scheduled event refresh without page requests, interval changes, new calendars, failure recovery, local reads, retention and account isolation |
 | [calendar-feeds.test.ts](tests/calendar-feeds.test.ts) | iCalendar serialization, feed migration and Graph pagination paths |
 
 ## Adding New Tests

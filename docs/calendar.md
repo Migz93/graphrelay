@@ -4,7 +4,7 @@
 
 ## Events View
 
-Open **Calendar → Events** to browse Month, Week, Day or Agenda views. Tick the calendars you want to see. The selection is remembered in that browser and is also used for upcoming events on the dashboard. The Events view reads a local snapshot and queues a background refresh when needed. [Sync](sync.md)
+Open **Calendar → Events** to browse Month, Week, Day or Agenda views. Tick the calendars you want to see. The selection is remembered in that browser and is also used for upcoming events on the dashboard. The Events view reads local snapshots. All calendars refresh in the background on the interval in **Settings → Calendar → General**, even with the page closed. The current month, previous month and next month are kept ready, along with up to three other recently viewed months. Opening a never-cached month queues its initial fetch. [Sync](sync.md)
 
 ## Calendar Display Dependencies
 

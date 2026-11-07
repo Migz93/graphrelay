@@ -11,7 +11,7 @@ GraphRelay polls Microsoft Graph. To Do and Calendar have independent schedules.
 | Unenrolled list | Global To Do interval | **Sync Now** |
 | Calendar directory | Global Calendar interval | **Refresh Calendars** |
 | Calendar feed | Per-feed interval or global default | **Refresh Now** or **Refresh Calendars** |
-| Calendar Events | Requested month and visible calendars, with the global Calendar interval as the freshness threshold | Browse the calendar view |
+| Calendar Events | Global Calendar interval, for all discovered calendars | **Refresh Calendars**, with initial fetches for uncached months |
 
 ## To Do Polling
 
@@ -27,8 +27,8 @@ An unenrolled run fetches a snapshot. Manual duplicate removal is available sepa
 
 Discovery reads accessible calendars and calendar groups. Feed refreshes request the configured window from each source, assemble iCalendar and publish the resulting snapshot in one database update. Account and feed revision checks keep an older refresh from publishing over newer settings. Requests for a feed already refreshing are coalesced.
 
-Events use snapshots keyed by account, calendar and month. A snapshot includes adjacent months for navigation. Missing or stale snapshots queue a refresh. The response can show the last good events while a refresh runs or after an error. The iCalendar route serves its stored content without a Microsoft request from the subscribing client.
+Events use snapshots keyed by account, calendar and month. The background scheduler refreshes every discovered calendar, including calendars hidden in the browser or unused by a feed. It warms the current UTC month and the previous and next months at startup and follows the global Calendar interval, including retries after failures. Up to three other recently viewed months join the same schedule. Each snapshot includes adjacent months for navigation, and retention protects the three nearby months within a six-month limit per calendar. Cached page reads use SQLite even when a snapshot is stale. Browsing a never-cached month queues its initial fetch. The response can show the last good events while a refresh runs or after an error. The iCalendar route serves its stored content without a Microsoft request from the subscribing client.
 
 ## UI Freshness
 
-To Do list pages refresh their local item snapshots periodically. The Calendar view queues and checks background refreshes as you navigate or change visible calendars. The dashboard reads the cached lists and calendar summaries. A button’s green confirmation describes the action that succeeded. Background sync errors stay visible separately.
+To Do list pages refresh their local item snapshots periodically. The Calendar view checks local snapshots while the independent scheduler keeps them fresh. Navigating to a never-cached month queues its first fetch. The dashboard reads the cached lists and calendar summaries. A button’s green confirmation describes the action that succeeded. Background sync errors stay visible separately.
