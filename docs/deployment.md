@@ -56,4 +56,6 @@ Saved **Public URL** and **Trust Proxy** settings override the environment defau
 
 ## Updates
 
+Use the candidate and recovery procedure in [Testing](../TESTING.md#live-replacement-and-verification). An explicit live image replacement request authorizes the restart and existing startup and scheduled work without another job confirmation or idle window. Running jobs may be interrupted. Repository-tooling and documentation changes alone do not trigger deployment.
+
 Preserve the data mount, port mappings, network, restart policy and runtime overrides when replacing a container. Keep Compose deployments under Compose. Check health and the browser after updating. [Live replacement and verification](../TESTING.md#live-replacement-and-verification)
