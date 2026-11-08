@@ -11,3 +11,10 @@ LOCAL.md
 docs
 .DS_Store
 ._*
+
+# Disposable browser authentication and generated check output
+tests/playwright/.auth
+tests/playwright-report
+tests/test-results
+coverage
+.test-data

@@ -54,7 +54,7 @@ Use small fixtures for matching, serialization and schema changes. Test destruct
 
 ## Manual Smoke Test
 
-1. Run the development checks. On the Docker host, record the commit, build tag and exact smoke container name in the ignored local runbook. Verify the build context and exclude private files.
+1. Before checks, record the source commit, branch, dirty state, lockfile hash and Docker-included changes in ignored `LOCAL.md`. Include hashes for modified, untracked or ignored files that enter the build context; exclude credentials. Verify installed dependencies match the recorded lockfile or run `npm ci` inside the devcontainer. Keep the context unchanged through checks and build; recheck before building and rerun checks if it changed. Record planned exact candidate tags, container names, disposable volumes and SSH forwards before creating them, then add their actual IDs.
 2. Build a uniquely tagged production image and record its ID. Start that exact image with fresh writable `/config` storage and no live integration credentials.
 3. Wait for Docker health, check HTTP and verify that the app runs as `node`. Exercise the changed path, including errors and relevant persistence. Use [mobile review](docs/mobile-review.md) for layout changes.
 
@@ -75,10 +75,16 @@ Use a unique name if a smoke container with the same name is already in use. Wai
 
 ### Disposable Test Cleanup
 
-Remove the task’s disposable container and any named test volume after validation, including after failure. Close only the tunnel created for that task. Check names, image IDs and concurrent use before removing anything. Keep candidate and rollback images that are still needed.
+Remove task-owned smoke containers and disposable storage after validation, including failure. Check the private task record, exact names or IDs and concurrent use first. For a configured test instance, prevent new manual and scheduled integration runs during cleanup, then wait within a bounded period for active work to finish. If prevention or job status cannot be verified, or active work remains after the bounded wait, preserve the instance, storage and task record, report deferred cleanup, and request the owner's decision. Do not interrupt active work or remove its storage. Disposable storage does not isolate Microsoft resources: use mocks or isolated test accounts, or obtain specific authorization for external writes.
+
+Close only task-owned SSH forwards. Remove unused candidate tags only when no live, rollback or pending review/deployment needs them. A name prefix alone does not prove ownership. Keep records until cleanup is verified; retain separate live recovery records and rollback tags until the owner releases the fallback. Follow [devcontainer cleanup](AGENTS.md#close-out-work) at PR close or cancellation.
 
 ### Live Replacement And Verification
 
-Before replacing the running app, record the live and candidate image IDs and the settings required to recreate the service. Preserve the config mount, port bindings, network, restart policy and environment overrides. Keep a known rollback image and check data compatibility before using it.
+Before stopping or removing live, create a separate `Live recovery` entry in ignored `LOCAL.md`. Record prior and candidate image IDs, a verified rollback tag and complete recreation settings: mounts, ports, networks, restart policy, user, environment overrides, command, entrypoint, labels, healthcheck and other host overrides. Reference secure credential sources without copying credentials. For Compose, retain its project settings and complete ordered file list, plus a persistent deployment-local image override outside the checkout with pulls and builds disabled; verify the unique tag resolves to the tested image ID.
+
+Assess pending migrations and whether the previous image can use the resulting schema. Follow the owner's recorded backup policy; document a compatible recovery path and any unverified steps. Report gaps before replacement and obtain direction if no usable recovery path is established. Data restoration requires owner approval. Keep the recovery entry and rollback image until the owner releases them and the tag is unused.
+
+An explicit request to deploy, update or replace live authorizes stopping and recreating the container and resuming existing startup and scheduled work. No separate job confirmation or idle window is required; running jobs may be interrupted. Preserve settings unless the requested change requires otherwise, recording required changes. This also applies to an approved rollback with compatible data. Preserve the current deployment method and data, recreate only the named service from the exact tested image, and repeat health and relevant configured checks. Follow disposable test cleanup first; deferred configured-test cleanup requires the owner's decision before replacement. A failed required check stops replacement.
 
 Deploy the exact tested candidate for implementation changes that affect the running app, unless the owner stops at validation. Confirm Docker health, HTTP and relevant configured behaviour. Keep private evidence in the operations runbook. Documentation, review and repository-tooling changes by themselves do not trigger replacement.

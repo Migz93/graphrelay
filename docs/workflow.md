@@ -4,9 +4,9 @@
 
 ## Branches And Checkouts
 
-Use develop as the integration branch and main for stable releases. Start task branches from an up-to-date develop checkout and open PRs back to develop. Use feat/, fix/, chore/, ci/ or docs/ prefixes. Reserve PRs into main for an authorized release. The maintainer selects develop as the repository default after the v1.0.0 release.
+Use develop as the integration branch and main for stable releases. Start task branches from an up-to-date develop checkout and open PRs back to develop. Use feat/, fix/, chore/, ci/ or docs/ prefixes. Reserve PRs into main for an authorized release. The repository default is develop.
 
-For the maintained SSH workflow, check the server and local branches and dirty state, then fast-forward the intended branch on both checkouts. Edit and run app checks as node in the GraphRelay devcontainer. Run authenticated Git commands and Docker builds on the host. Commit and push the task branch from the host, then fast-forward the same branch on the client. Keep machine-specific commands in LOCAL.md.
+For the maintained SSH workflow, check the server and local branches and dirty state, then fast-forward the intended branch on both checkouts. Edit source and run dependency installation, app checks and tests as node in the on-demand GraphRelay devcontainer. Run authenticated Git commands and Docker builds on the host. Commit and push the task branch from the host, then fast-forward the same branch on the client. Keep machine-specific commands in LOCAL.md. A retained client checkout is optional; synchronize through GitHub before using it and preserve unrelated work.
 
 ## GitHub CLI Usage
 
@@ -27,6 +27,14 @@ CI runs type checks, tests and a production build. PRs compile the production im
 ## CodeRabbit Review Process
 
 [CodeRabbit configuration](../.coderabbit.yaml) follows the sibling repos and targets both `main` and `develop`. Review tooling relies on the GitHub app having repository access. For a requested review, inspect findings against the current revision and confirm proposed fixes against GraphRelay’s auth, data and integration boundaries.
+
+## Cross-AI Review And Closeout
+
+After checks pass, commit the task changes and follow the owner's cross-AI review process from the host checkout against the intended base and head. Resolve valid findings, obtain a clean delta after fixes, then a fresh clean full review. A moved base or rewritten history requires a fresh full review. Record exact revisions and private saved reviews in ignored `LOCAL.md`. Follow the owner's separate PR, CodeRabbit and merge gates; review clearance alone does not authorize merging.
+
+When reviewing coordinated changes with the sibling apps, run CodeRabbit CLI reviews sequentially. Apply shared fixes to affected repos and clear their cross-AI delta and full reviews before resuming. Results apply only to the recorded revisions.
+
+Follow [agent closeout](../AGENTS.md#close-out-work) at PR close or cancellation, including task resources, retained volumes and verified task branches.
 
 ## Dependabot
 

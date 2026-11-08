@@ -35,9 +35,11 @@ Put durable project rules here, subsystem details under `docs/`, and task-specif
 
 ## Where You’re Running
 
-Check branch, dirty state and concurrent use on both checkouts. Follow the private SSH runbook for the maintained deployment. Edit the host checkout and run dependency installation, checks and tests as `node` inside GraphRelay’s devcontainer. Run authenticated Git, review and Docker operations on the Docker host.
+Check branch, dirty state and concurrent use on both checkouts. Follow the private SSH runbook for the maintained deployment. Edit source and run dependency installation, checks and tests as `node` inside GraphRelay’s on-demand devcontainer. Run authenticated Git, review and Docker operations on the Docker host.
 
-On a fresh checkout, copy [the example](.devcontainer/devcontainer.json.example) to the ignored `.devcontainer/devcontainer.json` and open it with a Dev Container client on the Docker host. Keep host launcher details in `LOCAL.md`. The example uses a disposable dependency volume. If a named development container is already running, verify its mount and concurrent use before using or replacing it. [Testing](TESTING.md)
+Start the on-demand container using the launcher recorded in ignored `LOCAL.md`. The development image is defined in `.devcontainer/Dockerfile`. It has no Docker socket or host home mount. GraphRelay has no Playwright dependency; do not copy browser-install commands from sibling apps without adding a deliberate supported browser setup.
+
+On a fresh checkout, copy [the example](.devcontainer/devcontainer.json.example) to the ignored `.devcontainer/devcontainer.json` and open it with a Dev Container client on the Docker host. Keep host launcher details in `LOCAL.md`. The example uses a disposable dependency volume. For an existing ignored configuration, replace its old `image` entry with the example’s `build` settings and rebuild. Preserve unrelated local settings and mounts; follow the concurrent-use and retained-volume safeguards below before removing the old container. If a named development container is already running, verify its mount and concurrent use before using or replacing it. Before rebuilding, record retained volumes by exact name, destination and options in `LOCAL.md`, and explicitly reattach them. Preserve unrelated local configuration. [Testing](TESTING.md)
 
 ## Live Container Conventions
 
@@ -62,7 +64,9 @@ Feature, fix, documentation and dependency PRs target `develop`. `main` contains
 
 ### Close Out Work
 
-Check resource ownership and concurrent use before cleaning up task containers, temporary volumes and SSH forwards. Keep the live and rollback images, other tasks’ resources, and the synchronized checkouts. Record deployed revisions and verification privately.
+At PR close or explicit cancellation, check resource ownership and concurrent use before removing task resources. Follow [cleanup](TESTING.md#disposable-test-cleanup). Identify the devcontainer through its launcher or checkout label and verify all mounts. Stop it before removal. Use the launcher teardown only when every anonymous volume is confirmed disposable. Otherwise record retained volumes by exact name, destination and options in ignored `LOCAL.md`, remove the container without `-v`, and remove only the confirmed disposable unused dependency volume. Retain volume records for the next setup and explicitly reattach them. Preserve the checkout, live app and recovery records.
+
+Return a clean available task checkout to `develop` and fast-forward it after merge or explicit cancellation. Delete only task branches verified merged (including squash-tree comparison) or explicitly discarded. A closed unmerged PR does not authorize discarding its branch. Preserve unsynchronized work and unrelated branches; report cleanup pending on disconnected clients. Record deployed revisions and verification privately.
 
 ## Technical Docs Are Part Of The Work
 
