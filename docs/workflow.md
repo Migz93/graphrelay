@@ -49,7 +49,7 @@ Follow [agent closeout](../AGENTS.md#close-out-work) at PR close or cancellation
 
 ## Release Notes
 
-Summarize user-visible changes, upgrade steps, fixes, security or maintenance, and Docker tags where applicable. PR titles beginning with feat, fix, docs, and ci automatically receive the matching release label, including scoped titles such as fix(calendar). The autolabeler runs on PR events with label-write permission. Release drafts update on pushes to main. Use the draft as a starting point and account for changes that landed directly on `main`.
+Summarize user-visible changes, upgrade steps, fixes, security or maintenance, and Docker tags where applicable. Use the draft as a starting point and account for changes that landed directly on `main`.
 
 ## Security Findings
 
@@ -62,3 +62,23 @@ Verify whether a finding affects the actual app or workflow. Record the evidence
 - Use code comments for invariants, recovery paths and provider quirks.
 - Document durable behaviour in the relevant topic page. Record live deployment details privately.
 - Deploy only runtime-affecting changes under the candidate process. Repository tooling and documentation changes can be validated independently.
+
+## PR Title And Release Automation
+
+The Semantic PR check runs on `pull_request` events (opened, edited,
+synchronize and reopened). It validates the title from the event payload without
+checking out PR code, accessing secrets or requesting token permissions. Accepted
+types are `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`,
+`revert`, `style` and `test`; optional scopes and a breaking-change `!` are
+supported. Keep the title accurate when reviewing and merging a PR.
+
+Release Drafter runs only on pushes to `main`. It reads merged PR titles
+directly: `feat` selects Features and a minor increment, `fix` selects Fixes,
+`docs` selects Documentation, and the other accepted types select Maintenance
+with a patch increment. Breaking titles such as `feat(api)!: change response`
+select Breaking Changes and a major increment. The highest matching increment
+wins. Automatic PR labeling is not used. Existing category labels remain as a
+fallback for historical PRs and Dependabot; `major` and `skip-changelog` retain
+their manual override/exclusion behavior. Unmatched changes go under Other
+Changes with a patch increment. Draft suggestions do not publish releases or
+change the version files; review the draft before publication.
