@@ -1,6 +1,7 @@
 import pluralize from "pluralize";
 import { assignProfileItem, profileMatcher } from "./profile-matcher.js";
 import express from "express";
+import { createGlobalRateLimiter, createSignInRateLimiter } from "./rate-limit.js";
 import session from "express-session";
 import { SqliteSessionStore } from "./session-store.js";
 import Database from "better-sqlite3";
@@ -427,6 +428,9 @@ async function pollLists() {
 schedulePoll(0);
 
 app.set("trust proxy", network.trustProxy ? 1 : false);
+// Cover subscriptions, API routes and the SPA before parsing bodies or sessions.
+app.use(createGlobalRateLimiter(console));
+const signInRateLimiter = createSignInRateLimiter(console);
 const duplicateRemovalPath = "/api/lists/:id/duplicates/remove";
 app.post(duplicateRemovalPath, express.json({ limit: "512kb" }));
 app.use(express.json({ limit: "16kb" }));
@@ -482,24 +486,16 @@ app.post("/api/setup", (req, res) => {
   setup = configuration;
   res.sendStatus(204);
 });
-let failures = 0;
-let resetAt = 0;
-function passwordAttemptsLimited() {
-  if (Date.now() > resetAt) { failures = 0; resetAt = Date.now() + 60_000; }
-  return failures >= 10;
-}
 function validPassword(password: unknown) {
   if (typeof password !== "string" || password.length > 1024) return false;
   if (setup) return timingSafeEqual(scryptSync(password, setup.salt, 32), Buffer.from(setup.passwordHash, "hex"));
   const digest = (value: string) => createHash("sha256").update(value).digest();
   return timingSafeEqual(digest(password), digest(env.ADMIN_PASSWORD!));
 }
-app.post("/api/login", (req, res, next) => {
+app.post("/api/login", signInRateLimiter, (req, res, next) => {
   if (!adminConfigured()) { res.sendStatus(503); return; }
-  if (passwordAttemptsLimited()) { res.sendStatus(429); return; }
   const { username, password } = req.body ?? {};
   if (!validPassword(password) || typeof username !== "string" || username.trim().toLowerCase() !== adminUsername().toLowerCase()) {
-    failures++;
     res.sendStatus(401);
     return;
   }
@@ -516,9 +512,8 @@ app.use("/api", (req, res, next) => {
   if (!isAdmin(req.session)) { res.sendStatus(401); return; }
   next();
 });
-app.post("/api/change-password", (req, res) => {
+app.post("/api/change-password", signInRateLimiter, (req, res) => {
   if (!setup) { res.status(409).json({ error: "This installation manages its admin password through the environment." }); return; }
-  if (passwordAttemptsLimited()) { res.status(429).json({ error: "Too many attempts. Try again in a minute." }); return; }
   const { currentPassword, newPassword, confirmPassword } = req.body ?? {};
   if (typeof newPassword !== "string" || !newPassword.trim() || newPassword.length > 256) {
     res.status(400).json({ error: "Enter a new password of up to 256 characters." });
@@ -529,7 +524,6 @@ app.post("/api/change-password", (req, res) => {
     return;
   }
   if (!validPassword(currentPassword)) {
-    failures++;
     res.status(400).json({ error: "Current password is incorrect." });
     return;
   }

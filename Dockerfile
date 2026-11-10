@@ -12,6 +12,9 @@ ARG BUILD_CHANNEL=custom
 LABEL org.opencontainers.image.revision=$COMMIT_SHA
 WORKDIR /app
 ENV NODE_ENV=production PORT=9304 DATA_DIR=/config COMMIT_SHA=$COMMIT_SHA BUILD_CHANNEL=$BUILD_CHANNEL
+# The runtime starts Node directly. Keep package managers in the build stage only.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /opt/yarn-v* \
+  && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg
 COPY --from=build /app/package.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
