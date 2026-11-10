@@ -26,9 +26,15 @@ SQLite uses WAL mode. Startup creates missing tables, adds the automatic cleanup
 
 ## Auth And Setup
 
-The web UI uses a local admin username and password. The password has a salted scrypt hash. Older password-only setups use `admin` as the username. GraphRelay encrypts setup, the MSAL token cache and persisted web session payloads with AES-256-GCM. The same persistent key also underlies cookie signing. A valid session survives a container replacement using the same key and data directory. Session records expire after seven days of inactivity. **Settings → General → Change Password** verifies the current password, stores a new salted hash and revokes all web sessions in one transaction. The username and Microsoft connection are preserved. Login and incorrect current-password attempts share the same rate limit. Legacy environment-managed passwords are configured outside the UI.
+The web UI uses a local admin username and password. The password has a salted scrypt hash. Older password-only setups use `admin` as the username. GraphRelay encrypts setup, the MSAL token cache and persisted web session payloads with AES-256-GCM. The same persistent key also underlies cookie signing. A valid session survives a container replacement using the same key and data directory. Session records expire after seven days of inactivity. **Settings → General → Change Password** verifies the current password, stores a new salted hash and revokes all web sessions in one transaction. The username and Microsoft connection are preserved. Login and password-change failures share a per-client limit of 10 failed requests per 15 minutes. Successful requests do not consume that allowance; validation and other 4xx/5xx responses do. Unauthenticated password-change requests are rejected before that limiter. Legacy environment-managed passwords are configured outside the UI.
 
 Microsoft OAuth uses a separate delegated connection. GraphRelay stores the OAuth state and PKCE verifier in the admin session and checks them on callback. Most API routes require an admin session. Mutating API requests also require the app’s request header. Tokenized calendar subscriptions are separate from the admin API and scoped to the connected calendar account. [Microsoft setup](microsoft.md)
+
+## Request Limits
+
+An app-wide per-client limiter allows 3,000 requests per minute, covering calendar subscriptions, API routes and the web shell before body parsing or session access. Built assets under `/assets/`, cached images under `/images/`, and the favicon are exempt. Limits use the client IP (grouping IPv6 addresses by the library's default subnet); enable Trust Proxy only behind one trusted proxy that overwrites forwarded headers. Counters are held in memory and reset when the process restarts.
+
+Limited requests return HTTP 429 with a JSON error and standard rate-limit/retry headers. Only the first rejection per client per window is logged. Limiter logs omit request paths and URLs so calendar tokens and Microsoft authorization parameters stay private. The Microsoft callback remains a GET using the existing Lax session cookie, OAuth state and PKCE checks.
 
 ## Major Subsystems
 

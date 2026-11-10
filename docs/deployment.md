@@ -2,7 +2,7 @@
 
 ## Image And Container
 
-GraphRelay uses Node.js 22 and runs as UID 1000 in the production image. The default internal port is `9304`, and `GET /api/health` checks process readiness. It does not exercise the Microsoft connection.
+GraphRelay uses Node.js 22 and runs as UID 1000 in the production image. The default internal port is `9304`, and `GET /api/health` checks process readiness. It does not exercise the Microsoft connection. The runtime starts Node directly and excludes npm, npx, Corepack and Yarn; dependency installation and compilation remain in the build stage.
 
 A push to `develop` publishes `ghcr.io/migz93/graphrelay:develop` and a short commit tag. A `v*` tag publishes the matching version, and a stable tag also updates `latest`. Both workflows build AMD64 and ARM64 images. Pin a published version or an image digest when you want reproducible upgrades. You can also build from the current checkout.
 
