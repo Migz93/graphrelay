@@ -44,6 +44,15 @@ test("real routes share failed-attempt limits, preserve Microsoft callbacks and 
   const authUrl = new URL((await connect.json()).url);
   assert.equal(authUrl.searchParams.get("redirect_uri"), "http://localhost:9304/api/microsoft/callback");
   const state = authUrl.searchParams.get("state")!;
+  // Requests rejected before the sign-in limiter must not spend its allowance.
+  for (let i = 0; i < 12; i++) {
+    const missingHeader = await fetch(base + "/api/login", { method: "POST", headers: { ...headers, "X-GraphRelay": "" }, body: JSON.stringify(credentials) });
+    await missingHeader.arrayBuffer();
+    assert.equal(missingHeader.status, 403);
+    const unauthenticated = await fetch(base + "/api/change-password", { method: "POST", headers: { ...headers, cookie: "" }, body: "{}" });
+    await unauthenticated.arrayBuffer();
+    assert.equal(unauthenticated.status, 401);
+  }
   // Authentication failures on login and password-change consume one shared budget.
   for (let i = 0; i < 9; i++) assert.equal((await post("/api/login", { ...credentials, password: "wrong" })).status, 401);
   assert.equal((await post("/api/change-password", { currentPassword: "wrong", newPassword: "replacement", confirmPassword: "replacement" })).status, 400);

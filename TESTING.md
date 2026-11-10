@@ -39,6 +39,7 @@ Use the disposable container’s bridge address and port when reachable from the
 
 | Test file | Coverage |
 |---|---|
+| [rate-limit-logging.test.ts](tests/rate-limit-logging.test.ts) | Pipelined request races, one warning per client/window, independent clients and window reset |
 | [rate-limit.test.ts](tests/rate-limit.test.ts) | Global and failed-sign-in limits, static exemptions, response headers and bounded logging |
 | [security-routes.test.ts](tests/security-routes.test.ts) | Shared login/password-change budget, per-client isolation, Microsoft callback/replay and cookie behavior, public-feed throttling and token-private logs |
 | [ordering.test.ts](tests/ordering.test.ts) | Shared numeric and named prefixes, custom order, title recovery and grocery matching |
