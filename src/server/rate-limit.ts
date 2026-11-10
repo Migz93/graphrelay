@@ -30,15 +30,12 @@ export const GLOBAL_RATE_LIMIT = { windowMs: 60_000, limit: 3000 } as const;
 export const SIGN_IN_RATE_LIMIT = { windowMs: 15 * 60_000, limit: 10 } as const;
 
 /**
- * Built frontend assets, cached images and the favicon don't count toward the
- * global limit. They're cheap static files that the browser fetches in bulk:
- * a single library page can request dozens of covers. Cached images still
- * require a session; this only exempts them from the request count.
+ * Built frontend assets and the favicon don't count toward the global limit.
+ * Keep app pages and unmatched paths counted; GraphRelay has no image cache.
  */
 export function isRateLimitExempt(path: string): boolean {
   return (
     path.startsWith("/assets/") ||
-    path.startsWith("/images/") ||
     path.replace(/\/$/, "") === "/favicon.ico"
   );
 }

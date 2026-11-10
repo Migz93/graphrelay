@@ -54,15 +54,15 @@ async function statusesOf(url: string, count: number): Promise<number[]> {
   return statuses;
 }
 
-test("static assets, cached images and the favicon are exempt from the global limit", () => {
+test("only built assets and the favicon are exempt from the global limit", () => {
   assert.equal(isRateLimitExempt("/assets/index-abc123.js"), true);
-  assert.equal(isRateLimitExempt("/images/covers/1.jpg"), true);
+  assert.equal(isRateLimitExempt("/images/covers/1.jpg"), false);
   assert.equal(isRateLimitExempt("/favicon.ico"), true);
   assert.equal(isRateLimitExempt("/favicon.ico/"), true);
 
   assert.equal(isRateLimitExempt("/api/dashboard"), false);
   assert.equal(isRateLimitExempt("/"), false);
-  assert.equal(isRateLimitExempt("/books"), false);
+  assert.equal(isRateLimitExempt("/calendar"), false);
   assert.equal(isRateLimitExempt("/assets"), false);
 });
 
@@ -95,6 +95,9 @@ test("the global limiter rejects requests past the limit with JSON, logs once, a
     await rejectedAgain.arrayBuffer();
     assert.equal(rejectedAgain.status, 429);
 
+    const unmatchedImage = await fetch(`${baseUrl}/images/missing.jpg`);
+    assert.equal(unmatchedImage.status, 429);
+    await unmatchedImage.arrayBuffer();
     assert.equal((await fetch(`${baseUrl}/assets/app.js`)).status, 200);
   });
 

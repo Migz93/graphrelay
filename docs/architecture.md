@@ -32,7 +32,7 @@ Microsoft OAuth uses a separate delegated connection. GraphRelay stores the OAut
 
 ## Request Limits
 
-An app-wide per-client limiter allows 3,000 requests per minute, covering calendar subscriptions, API routes and the web shell before body parsing or session access. Built assets under `/assets/`, cached images under `/images/`, and the favicon are exempt. Limits use the client IP (grouping IPv6 addresses by the library's default subnet); enable Trust Proxy only behind one trusted proxy that overwrites forwarded headers. Counters are held in memory and reset when the process restarts.
+An app-wide per-client limiter allows 3,000 requests per minute, covering calendar subscriptions, API routes and the web shell before body parsing or session access. Built assets under `/assets/` and the favicon are exempt. App pages and unmatched paths, including `/images/`, remain counted. Limits use the client IP (grouping IPv6 addresses by the library's default subnet); enable Trust Proxy only behind one trusted proxy that overwrites forwarded headers. Counters are held in memory and reset when the process restarts.
 
 Limited requests return HTTP 429 with a JSON error and standard rate-limit/retry headers. Only the first rejection per client per window is logged. Limiter logs omit request paths and URLs so calendar tokens and Microsoft authorization parameters stay private. The Microsoft callback remains a GET using the existing Lax session cookie, OAuth state and PKCE checks.
 
