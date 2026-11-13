@@ -9,7 +9,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import Layout, { type BuildInfo } from "./components/Layout";
 import { ErrorBanner, Page, PageHeader, PageLoading } from "./components/Page";
-import { compactSecondaryButtonClass, dangerButtonClass, SectionCard, SelectInput, SettingRow, SettingToggle, TextInput, primaryButtonClass, secondaryButtonClass, successButtonClass } from "./components/FormControls";
+import { compactSecondaryButtonClass, dangerButtonClass, SectionCard, SelectInput, SettingToggle, TextInput, primaryButtonClass, secondaryButtonClass, successButtonClass } from "./components/FormControls";
 
 import { api, sessionExpiredEvent, SessionExpiredError } from "./lib/api";
 import CalendarFeeds, { CalendarSettings } from "./CalendarFeeds";
