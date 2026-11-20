@@ -1,6 +1,6 @@
-import { equal } from "node:assert/strict";
+import { deepEqual, equal } from "node:assert/strict";
 import { test } from "node:test";
-import { assignProfileItem, profileMatcher } from "../src/server/profile-matcher.js";
+import { assignProfileItem, discoverProfileItems, profileMatcher } from "../src/server/profile-matcher.js";
 
 test("moving all default names into editable matches preserves pack sizes and removals", () => {
   const match = profileMatcher({
@@ -57,4 +57,32 @@ test("moving a grocery item saves a shared match that beats defaults and storage
   equal(match("frozen berries"), "Frozen");
   equal(match("ice cream"), "Frozen");
   equal(updated.groups[1].matches.length, 0);
+});
+
+
+test("discovery normalizes unknown items and preserves exact, default, prefix and Other rules", () => {
+  const profile = {
+    id: "sample", name: "Sample", grocery: true, ignoreQuantities: true,
+    groups: [
+      { name: "Produce", matches: ["apple"], defaultMatches: ["pear"], matchPlurals: true },
+      { name: "Frozen", matches: [], prefixes: ["frozen"] },
+      { name: "Other", matches: ["known"], defaultMatches: ["other default"], prefixes: ["misc"], matchPlurals: true },
+    ],
+  };
+  const updated = discoverProfileItems(profile, ["  Star   Fruits 500g ", "2 x star fruit", "apples", "pears", "frozen peas", "known", "other default", "misc item", " "]);
+  deepEqual(updated.groups[2].matches, ["known", "star fruit"]);
+  equal(updated.groups[0], profile.groups[0]);
+  equal(updated.groups[1], profile.groups[1]);
+  deepEqual(profile.groups[2].matches, ["known"]);
+  equal(discoverProfileItems(updated, ["star fruits", "star fruit 1kg", "apples"]), updated);
+  const moved = assignProfileItem(updated, "star fruits 500g", "Produce");
+  equal(profileMatcher(moved)("star fruits 1kg"), "Produce");
+  equal(discoverProfileItems(moved, ["star fruits 500g"]), moved);
+});
+
+test("discovery retains meaningful quantities and distinct plurals when those options are disabled", () => {
+  const profile = { id: "sample", name: "Sample", grocery: false, groups: [{ name: "Other", matches: [] }] };
+  const updated = discoverProfileItems(profile, ["Widget", " widget ", "widgets", "widget 2kg"]);
+  deepEqual(updated.groups[0].matches, ["widget", "widgets", "widget 2kg"]);
+  equal(discoverProfileItems(updated, ["WIDGET", "widgets", "widget 2kg"]), updated);
 });

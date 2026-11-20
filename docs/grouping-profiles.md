@@ -39,3 +39,5 @@ The group order in the file determines prefix order. Each profile needs an `Othe
 - `grocery` identifies a grocery profile. The built-in Groceries profile sets it to true.
 
 Matching checks explicit matches, then prefix rules and default aliases. Unknown items go to Other. Moving a To Do item saves an explicit match in its shared profile using the profile’s quantity and plural options. Lists using the profile apply the change on their next sync. Per-list settings remain in the local database. Older list-specific corrections are ignored.
+
+During sync, unknown open items from enrolled lists with grouping enabled are saved under **Other** in their shared profile. Open **Settings → To Do → Groupings**, select Other, and drag an item into the correct group, then save. Discoveries use the profile’s quantity and plural matching options and are deduplicated across lists and repeated syncs. Known matches are preserved. Removing an unknown entry does not suppress discovery: it can return on the next sync while the item remains open. If a sync adds entries while the editor is open, reopen Groupings before saving a stale draft.

@@ -1,8 +1,9 @@
 import pluralize from "pluralize";
 import { groceryProductName } from "./groceries.js";
+import { itemKey } from "./ordering.js";
 import type { Profile } from "./grouping-store.js";
 
-export function profileMatcher(profile: Profile) {
+function resolveProfileMatch(profile: Profile) {
   const matches = new Map(profile.groups.flatMap(group => group.matches.map(match => [match, group.name] as const)));
   const defaults = new Map(profile.groups.flatMap(group => (group.defaultMatches ?? []).map(match => [match, group.name] as const)));
   const pluralMatches = new Map(profile.groups.filter(group => group.matchPlurals).flatMap(group => group.matches.map(match => [pluralize.singular(match), group.name] as const)));
@@ -12,7 +13,33 @@ export function profileMatcher(profile: Profile) {
     const exact = matches.get(name) ?? matches.get(product) ?? pluralMatches.get(pluralize.singular(product));
     if (exact) return exact;
     const prefix = profile.groups.find(group => group.prefixes?.some(prefix => product.startsWith(prefix + " ")));
-    return prefix?.name ?? defaults.get(product) ?? pluralDefaults.get(pluralize.singular(product)) ?? "Other";
+    return prefix?.name ?? defaults.get(product) ?? pluralDefaults.get(pluralize.singular(product));
+  };
+}
+
+export function profileMatcher(profile: Profile) {
+  const match = resolveProfileMatch(profile);
+  return (name: string) => match(name) ?? "Other";
+}
+
+// Keep known Other rules distinct from the fallback so discovery never overrides a match.
+export function discoverProfileItems(profile: Profile, names: string[]): Profile {
+  const other = profile.groups.find(group => group.name === "Other");
+  if (!other) throw new Error("The Other group is missing.");
+  const match = resolveProfileMatch(profile);
+  const discovered = new Set<string>();
+  for (const value of names) {
+    const name = itemKey(value);
+    if (!name || match(name) !== undefined) continue;
+    const product = (profile.ignoreQuantities && groceryProductName(name)) || name;
+    const key = other.matchPlurals ? pluralize.singular(product) : product;
+    if (match(key) === undefined) discovered.add(key);
+  }
+  if (!discovered.size) return profile;
+  return {
+    ...profile,
+    groups: profile.groups.map(group => group === other
+      ? { ...group, matches: [...group.matches, ...discovered] } : group),
   };
 }
 

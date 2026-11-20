@@ -1,5 +1,5 @@
 import pluralize from "pluralize";
-import { assignProfileItem, profileMatcher } from "./profile-matcher.js";
+import { assignProfileItem, discoverProfileItems, profileMatcher } from "./profile-matcher.js";
 import express from "express";
 import { createGlobalRateLimiter, createSignInRateLimiter } from "./rate-limit.js";
 import session from "express-session";
@@ -991,6 +991,14 @@ async function syncSnapshot(list: Enrolled, tasks?: Task[]) {
   const account = read("account");
   const path = taskPath(list.id);
   const planned = planList(list, tasks ?? await collection<Task>(path));
+  // Read and save the current shared profile without an await between them. Another
+  // list sync or settings edit must not be overwritten by an older profile snapshot.
+  const enrolled = enrolledList(list.id);
+  if (client === msal && account === read("account") && enrolled && enrolled.mode !== "off" && !read(unenrollKey(list.id))) {
+    const profile = listProfile(enrolled);
+    const updated = discoverProfileItems(profile, planned.filter(task => task.status !== "completed").map(task => task.base));
+    if (updated !== profile) groupingStore.save(updated);
+  }
   const groups = duplicateGroups(planned);
   const previous = readSnapshot(list.id);
   const checks = new Map<string, Check>();

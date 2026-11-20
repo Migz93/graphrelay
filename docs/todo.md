@@ -27,3 +27,5 @@ Grouping prefixes added by GraphRelay are excluded from the duplicate key. Match
 ## Unenrollment
 
 In **List Settings → General**, select **Unenroll List** beside **Save List Settings**, then select **Are You Sure?** to confirm. GraphRelay removes its tracked prefixes from open and completed items before ending automation. If restoration fails partway, list automation pauses until you retry. Successful unenrollment removes the list’s local settings and title tracking. The shared profile stays available to other lists.
+
+During sync, unknown open items from enrolled lists with grouping enabled are saved under **Other** in their shared profile. Open **Settings → To Do → Groupings**, select Other, and drag an item into the correct group, then save. Discoveries use the profile’s quantity and plural matching options and are deduplicated across lists and repeated syncs. Known matches are preserved. Removing an unknown entry does not suppress discovery: it can return on the next sync while the item remains open. If a sync adds entries while the editor is open, reopen Groupings before saving a stale draft.
