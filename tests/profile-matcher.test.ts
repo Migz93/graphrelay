@@ -139,3 +139,17 @@ test("unknown plurals stay editable without changing an existing exact singular"
     equal(discoverProfileItems(saved, [singular, plural]), saved);
   }
 });
+
+
+test("empty singular forms retain the original alias across discovery, editor and assignment", () => {
+  const profile = { id: "sample", name: "Sample", grocery: false,
+    groups: [{ name: "Produce", matches: [], matchPlurals: true }, { name: "Other", matches: [], matchPlurals: true }] };
+  const updated = discoverProfileItems(profile, ["s"]);
+  deepEqual(updated.groups[1].defaultMatches, ["s"]);
+  const draft = groupingDraft(updated.groups);
+  deepEqual(draft[1].matches, ["s"]);
+  equal(discoverProfileItems(updated, ["s"]), updated);
+  const moved = assignProfileItem(updated, "s", "Produce");
+  deepEqual(moved.groups[0].matches, ["s"]);
+  equal(profileMatcher(moved)("s"), "Produce");
+});

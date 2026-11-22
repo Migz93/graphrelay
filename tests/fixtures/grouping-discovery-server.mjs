@@ -22,6 +22,10 @@ const tasks = new Map(["first", "second", "disabled", "unenrolled"].map(id => [i
   { id: "done", title: "Completed unknown", status: "completed" },
 ]]));
 process.on("message", message => {
+  if (message === "short-name") {
+    tasks.get("second").push({ id: "short", title: "s", status: "notStarted" });
+    process.send("short-added");
+  }
   if (message === "add") {
     tasks.get("first").push({ id: "new", title: "Dragon fruit", status: "notStarted" });
     process.send("added");

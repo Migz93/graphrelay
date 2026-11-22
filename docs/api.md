@@ -54,7 +54,7 @@ Secret presence is a boolean. The API does not return the stored secret. See [Mi
 | `GET /api/lists/:id/items/:taskId/group` | Current match and shared profile revision |
 | `PUT /api/lists/:id/items/:taskId/group` | Save a shared match with the returned `name`, `profileId`, `revision` and target `group` |
 
-The general JSON limit is 16 KiB. Duplicate removal accepts up to 512 KiB and returns 413 for an oversized body. Per-list writes can return 409 when a conflicting operation is active. Grouping edits check the submitted revision to catch stale drafts. Plural normalization preserves a literal plural when its singular is explicitly assigned to another group, using the same rules as the Groupings editor. [To Do](todo.md) · [Sync](sync.md)
+The general JSON limit is 16 KiB. After authentication, an existing grouping-profile save accepts the UTF-8 byte size of its current complete editor payload plus 16 KiB for edits. This includes JSON escaping and profile metadata, so profiles remain editable as discovery adds names. New profiles retain the 16 KiB limit. Duplicate removal accepts up to 512 KiB and returns 413 for an oversized body. Per-list writes can return 409 when a conflicting operation is active. Grouping edits check the submitted revision to catch stale drafts. Plural normalization preserves a literal plural when its singular is explicitly assigned to another group, using the same rules as the Groupings editor. [To Do](todo.md) · [Sync](sync.md)
 
 ## Calendar
 

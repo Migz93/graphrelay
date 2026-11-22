@@ -21,6 +21,8 @@ test("sync discovers editable shared entries, protects stale drafts and remember
   store.save(discoverProfileItems({ id: "collision", name: "Collision", grocery: false, ignoreQuantities: true, groups: [
     { name: "Produce", matches: ["apple"] }, { name: "Frozen", matches: [] }, { name: "Other", matches: [], matchPlurals: true },
   ] }, ["apples", "500g"]));
+  store.save(discoverProfileItems({ id: "large", name: "Large 🥝", grocery: false,
+    groups: [{ name: "Other", matches: [] }] }, Array.from({ length: 3000 }, (_, i) => '未知 "é" \\ ' + i)));
   const server = fork(fileURLToPath(new URL("./fixtures/grouping-discovery-server.mjs", import.meta.url)), {
     execArgv: ["--import", "tsx"],
     env: { ...process.env, DATA_DIR: dir, PORT: "0", PUBLIC_URL: "http://localhost:9304", APP_SECRET: "fixture", ADMIN_PASSWORD: "fixture", MICROSOFT_CLIENT_ID: "fixture", MICROSOFT_CLIENT_SECRET: "fixture" },
@@ -101,5 +103,45 @@ test("sync discovers editable shared entries, protects stale drafts and remember
   collisionDraft = moveMatch(groupingDraft(collision.groups), "apples", collisionDraft[1].id);
   await saveCollision();
   assert.equal(profileMatcher(collision)("apples"), "Frozen");
+  const large = (await profiles()).find(profile => profile.id === "large")!;
+  const largeBody = { name: large.name, revision: large.revision, allMatches: true,
+    groups: groupingDraft(large.groups).map(({name, matches, prefixes, matchPlurals}) => ({name, matches, prefixes, matchPlurals})) };
+  assert.ok(Buffer.byteLength(JSON.stringify(largeBody)) > 16 * 1024);
+  const largeSave = await fetch(base + "/api/grouping-profiles/large/", { method: "PUT", headers, body: JSON.stringify(largeBody) });
+  assert.equal(largeSave.status, 200, await largeSave.text());
+  assert.equal(store.read().find(profile => profile.id === "large")!.groups[0].matches.length, 3000);
+  const excessive = await fetch(base + "/api/grouping-profiles/large", { method: "PUT", headers,
+    body: JSON.stringify({ ...largeBody, padding: "x".repeat(16 * 1024 + 1) }) });
+  assert.equal(excessive.status, 413);
+  const newProfile = await fetch(base + "/api/grouping-profiles/new", { method: "PUT", headers, body: JSON.stringify(largeBody) });
+  assert.equal(newProfile.status, 413);
+  const otherRoute = await fetch(base + "/api/network", { method: "PUT", headers, body: JSON.stringify(largeBody) });
+  assert.equal(otherRoute.status, 413);
+  const unauthenticated = await fetch(base + "/api/grouping-profiles/large", { method: "PUT",
+    headers: { "Content-Type": "application/json", "X-GraphRelay": "1" }, body: JSON.stringify(largeBody) });
+  assert.equal(unauthenticated.status, 401);
+  const missingHeader = await fetch(base + "/api/grouping-profiles/large", { method: "PUT",
+    headers: { "Content-Type": "application/json", cookie: headers.cookie }, body: JSON.stringify(largeBody) });
+  assert.equal(missingHeader.status, 403);
+  const staleLarge = await fetch(base + "/api/grouping-profiles/large", { method: "PUT", headers, body: JSON.stringify(largeBody) });
+  assert.equal(staleLarge.status, 409);
+  const settings = await fetch(base + "/api/lists/second", { method: "PUT", headers,
+    body: JSON.stringify({ mode: "number-2", profileId: "collision", autoCleanup: false, syncMinutes: null }) });
+  assert.equal(settings.status, 204);
+  const shortAdded = once(server, "message", { signal: AbortSignal.timeout(5_000) });
+  server.send("short-name");
+  await shortAdded;
+  await sync("second");
+  const shortProfile = (await profiles()).find(profile => profile.id === "collision")!;
+  assert.ok(shortProfile.groups[2].defaultMatches?.includes("s"));
+  const shortDraft = groupingDraft(shortProfile.groups);
+  assert.ok(shortDraft[2].matches.includes("s"));
+  const saveShort = await fetch(base + "/api/grouping-profiles/collision", { method: "PUT", headers,
+    body: JSON.stringify({ name: shortProfile.name, revision: shortProfile.revision, allMatches: true, groups: shortDraft }) });
+  assert.equal(saveShort.status, 200, await saveShort.text());
+  await sync("second");
+  assert.ok(store.read().find(profile => profile.id === "collision")!.groups[2].matches.includes("s"));
+
+
 
 });
