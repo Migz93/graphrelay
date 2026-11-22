@@ -1,4 +1,4 @@
-import pluralize from "pluralize";
+import { compactMatchGroups } from "./grouping-normalization.js";
 import { assignProfileItem, discoverProfileItems, profileMatcher } from "./profile-matcher.js";
 import express from "express";
 import { createGlobalRateLimiter, createSignInRateLimiter } from "./rate-limit.js";
@@ -740,15 +740,15 @@ app.put("/api/grouping-profiles/:id", (req, res) => {
     res.status(400).json({ error: "Enter a profile name and between 1 and 30 named groups." });
     return;
   }
-  const normalized = (groups as Profile["groups"]).map(group => {
+  const normalized = compactMatchGroups((groups as Profile["groups"]).map(group => {
     const matchPlurals = group.matchPlurals ?? existing?.groups.find(value => value.name === group.name)?.matchPlurals ?? false;
     const matches = group.matches.map(itemKey).filter(Boolean);
     return {
       name: group.name.trim(),
-      matches: [...new Set(matchPlurals ? matches.map(match => pluralize.singular(match)) : matches)],
+      matches,
       prefixes: group.prefixes?.map(itemKey).filter(Boolean), matchPlurals,
     };
-  });
+  }));
   const names = normalized.map(group => itemKey(group.name));
   const matches = normalized.flatMap(group => group.matches);
   if (!normalized.some(group => group.name === "Other") || new Set(names).size !== names.length || new Set(matches).size !== matches.length) {

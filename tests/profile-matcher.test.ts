@@ -115,3 +115,27 @@ test("discovered plural aliases preserve known default assignments through edito
     equal(discoverProfileItems(saved, [singular, plural]), saved);
   }
 });
+
+
+test("quantity-only discoveries stop changing the profile after the first sync", () => {
+  const profile = { id: "sample", name: "Sample", grocery: true, ignoreQuantities: true,
+    groups: [{ name: "Other", matches: [] }] };
+  const updated = discoverProfileItems(profile, ["500g", "2 x", "500g"]);
+  deepEqual(updated.groups[0].defaultMatches, ["500g", "2 x"]);
+  equal(discoverProfileItems(updated, ["500g", "2 x"]), updated);
+});
+
+test("unknown plurals stay editable without changing an existing exact singular", () => {
+  for (const [singular, plural] of [["apple", "apples"], ["mouse", "mice"]]) {
+    const profile = { id: "sample", name: "Sample", grocery: false,
+      groups: [{ name: "Produce", matches: [singular] }, { name: "Other", matches: [], matchPlurals: true }] };
+    const updated = discoverProfileItems(profile, [plural]);
+    const draft = groupingDraft(updated.groups);
+    deepEqual(draft[0].matches, [singular]);
+    deepEqual(draft[1].matches, [plural]);
+    const saved = { ...updated, groups: draft.map(({name, matches, matchPlurals}) => ({name, matches, matchPlurals})) };
+    equal(profileMatcher(saved)(singular), "Produce");
+    equal(profileMatcher(saved)(plural), "Other");
+    equal(discoverProfileItems(saved, [singular, plural]), saved);
+  }
+});

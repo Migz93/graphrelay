@@ -3,7 +3,7 @@ import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, v
 import { CSS } from "@dnd-kit/utilities";
 import { cn } from "./lib/utils";
 import { useActionFeedback } from "./lib/useActionFeedback";
-import { compactMatches, groupingDraft, matchKey, moveMatch, removeGroup, type GroupDraft, type MatchGroup } from "./lib/groupingDraft";
+import { compactMatchGroups, groupingDraft, matchKey, moveMatch, removeGroup, type GroupDraft, type MatchGroup } from "./lib/groupingDraft";
 import { ChevronRight, Eye, EyeOff, GripVertical, Minus, Plus, X } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -658,7 +658,7 @@ function GroupingProfiles({ onBusy }: { onBusy: (busy: boolean) => void }) {
                 <label className="flex items-center gap-2 pb-3 text-sm">
                   <input type="checkbox" className="accent-primary" checked={activeGroup.matchPlurals} onChange={event => {
                     const enabled = event.target.checked;
-                    setGroups(groups.map(group => group.id === activeId ? { ...group, matchPlurals: enabled, matches: compactMatches(group.matches, enabled) } : group));
+                    setGroups(compactMatchGroups(groups.map(group => group.id === activeId ? { ...group, matchPlurals: enabled } : group)));
                     setMoveItem(""); setNotice("");
                   }} />
                   Match singular and plural

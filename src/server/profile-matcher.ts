@@ -9,7 +9,7 @@ function resolveProfileMatch(profile: Profile) {
   const pluralMatches = new Map(profile.groups.filter(group => group.matchPlurals).flatMap(group => group.matches.map(match => [pluralize.singular(match), group.name] as const)));
   const pluralDefaults = new Map(profile.groups.filter(group => group.matchPlurals).flatMap(group => (group.defaultMatches ?? []).map(match => [pluralize.singular(match), group.name] as const)));
   return (name: string) => {
-    const product = profile.ignoreQuantities ? groceryProductName(name) : name;
+    const product = (profile.ignoreQuantities && groceryProductName(name)) || name;
     const exact = matches.get(name) ?? matches.get(product) ?? pluralMatches.get(pluralize.singular(product));
     if (exact) return exact;
     const prefix = profile.groups.find(group => group.prefixes?.some(prefix => product.startsWith(prefix + " ")));
@@ -33,7 +33,7 @@ export function discoverProfileItems(profile: Profile, names: string[]): Profile
     if (!name || match(name) !== undefined) continue;
     const product = (profile.ignoreQuantities && groceryProductName(name)) || name;
     const key = other.matchPlurals ? pluralize.singular(product) : product;
-    if (match(key) === undefined) discovered.add(key);
+    discovered.add(match(key) === undefined ? key : product);
   }
   if (!discovered.size) return profile;
   return {

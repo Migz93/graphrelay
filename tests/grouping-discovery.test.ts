@@ -8,6 +8,7 @@ import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { GroupingStore, type Profile } from "../src/server/grouping-store.js";
+import { discoverProfileItems, profileMatcher } from "../src/server/profile-matcher.js";
 import { groupingDraft, moveMatch } from "../src/client/lib/groupingDraft.js";
 
 test("sync discovers editable shared entries, protects stale drafts and remembers moved matches", { timeout: 20_000 }, async t => {
@@ -17,6 +18,9 @@ test("sync discovers editable shared entries, protects stale drafts and remember
     { name: "Produce", matches: [], matchPlurals: true }, { name: "Other", matches: [] },
   ] });
   store.save({ id: "unrelated", name: "Unrelated", grocery: false, groups: [{ name: "Other", matches: [] }] });
+  store.save(discoverProfileItems({ id: "collision", name: "Collision", grocery: false, ignoreQuantities: true, groups: [
+    { name: "Produce", matches: ["apple"] }, { name: "Frozen", matches: [] }, { name: "Other", matches: [], matchPlurals: true },
+  ] }, ["apples", "500g"]));
   const server = fork(fileURLToPath(new URL("./fixtures/grouping-discovery-server.mjs", import.meta.url)), {
     execArgv: ["--import", "tsx"],
     env: { ...process.env, DATA_DIR: dir, PORT: "0", PUBLIC_URL: "http://localhost:9304", APP_SECRET: "fixture", ADMIN_PASSWORD: "fixture", MICROSOFT_CLIENT_ID: "fixture", MICROSOFT_CLIENT_SECRET: "fixture" },
@@ -79,4 +83,23 @@ test("sync discovers editable shared entries, protects stale drafts and remember
   assert.deepEqual(current.groups[1].matches, ["dragon fruit"]);
   assert.deepEqual(store.read().find(profile => profile.id === "sample")!.groups, current.groups);
   assert.deepEqual(store.read().find(profile => profile.id === "unrelated")!.groups[0].matches, []);
+  let collision = (await profiles()).find(profile => profile.id === "collision")!;
+  let collisionDraft = groupingDraft(collision.groups);
+  assert.deepEqual(collisionDraft[2].matches, ["apples", "500g"]);
+  async function saveCollision() {
+    const result = await fetch(base + "/api/grouping-profiles/collision", {
+      method: "PUT", headers, body: JSON.stringify({ name: collision.name, revision: collision.revision, allMatches: true, groups: collisionDraft }),
+    });
+    assert.equal(result.status, 200, await result.text());
+    collision = (await profiles()).find(profile => profile.id === "collision")!;
+    const persisted = store.read().find(profile => profile.id === "collision")!;
+    assert.equal(profileMatcher(persisted)("apple"), "Produce");
+    assert.equal(discoverProfileItems(persisted, ["apples", "500g"]), persisted);
+  }
+  await saveCollision();
+  assert.equal(profileMatcher(collision)("apples"), "Other");
+  collisionDraft = moveMatch(groupingDraft(collision.groups), "apples", collisionDraft[1].id);
+  await saveCollision();
+  assert.equal(profileMatcher(collision)("apples"), "Frozen");
+
 });
