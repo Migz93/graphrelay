@@ -1,5 +1,5 @@
-import pluralize from "pluralize";
-import { assignProfileItem, profileMatcher } from "./profile-matcher.js";
+import { compactMatchGroups, editableMatchGroups } from "./grouping-normalization.js";
+import { assignProfileItem, discoverProfileItems, profileMatcher } from "./profile-matcher.js";
 import express from "express";
 import { createGlobalRateLimiter, createSignInRateLimiter } from "./rate-limit.js";
 import session from "express-session";
@@ -433,7 +433,11 @@ app.use(createGlobalRateLimiter(console));
 const signInRateLimiter = createSignInRateLimiter(console);
 const duplicateRemovalPath = "/api/lists/:id/duplicates/remove";
 app.post(duplicateRemovalPath, express.json({ limit: "512kb" }));
-app.use(express.json({ limit: "16kb" }));
+const groupingProfilePath = "/api/grouping-profiles/:id";
+// Defer this route's parsing until after session and mutation-header checks.
+app.put(groupingProfilePath, (_req, res, next) => { res.locals.groupingProfileWrite = true; next(); });
+const generalJson = express.json({ limit: "16kb" });
+app.use((req, res, next) => res.locals.groupingProfileWrite ? next() : generalJson(req, res, next));
 app.use("/calendar-feeds", calendarFeeds.subscription);
 app.use(session({
   store: new SqliteSessionStore(db, { encrypt, decrypt }),
@@ -722,7 +726,16 @@ app.get("/api/grouping-profiles", (_req, res) => {
     ...profile, revision: profileRevision(profile), usedBy: lists.filter(list => list.mode !== "off" && listProfile(list).id === profile.id).length,
   })));
 });
-app.put("/api/grouping-profiles/:id", (req, res) => {
+app.put(groupingProfilePath, (req, res, next) => {
+  const existing = profiles().find(profile => profile.id === req.params.id);
+  const groups = existing && editableMatchGroups(existing.groups).map(({ name, matches, prefixes, matchPlurals }) => ({ name, matches, prefixes, matchPlurals }));
+  const storedBytes = existing ? Buffer.byteLength(JSON.stringify({
+    name: existing.name, revision: profileRevision(existing), allMatches: true, groups,
+  })) : 0;
+  // Accept the complete current editor payload plus 16 KiB for edits. New
+  // profiles retain the general limit; no expanded parser runs before auth.
+  express.json({ limit: storedBytes + 16 * 1024 })(req, res, next);
+}, (req, res) => {
   const values = profiles();
   const existing = values.find(profile => profile.id === req.params.id);
   if (!existing && req.params.id !== "new") { res.sendStatus(404); return; }
@@ -740,15 +753,15 @@ app.put("/api/grouping-profiles/:id", (req, res) => {
     res.status(400).json({ error: "Enter a profile name and between 1 and 30 named groups." });
     return;
   }
-  const normalized = (groups as Profile["groups"]).map(group => {
+  const normalized = compactMatchGroups((groups as Profile["groups"]).map(group => {
     const matchPlurals = group.matchPlurals ?? existing?.groups.find(value => value.name === group.name)?.matchPlurals ?? false;
     const matches = group.matches.map(itemKey).filter(Boolean);
     return {
       name: group.name.trim(),
-      matches: [...new Set(matchPlurals ? matches.map(match => pluralize.singular(match)) : matches)],
+      matches,
       prefixes: group.prefixes?.map(itemKey).filter(Boolean), matchPlurals,
     };
-  });
+  }));
   const names = normalized.map(group => itemKey(group.name));
   const matches = normalized.flatMap(group => group.matches);
   if (!normalized.some(group => group.name === "Other") || new Set(names).size !== names.length || new Set(matches).size !== matches.length) {
@@ -991,6 +1004,14 @@ async function syncSnapshot(list: Enrolled, tasks?: Task[]) {
   const account = read("account");
   const path = taskPath(list.id);
   const planned = planList(list, tasks ?? await collection<Task>(path));
+  // Read and save the current shared profile without an await between them. Another
+  // list sync or settings edit must not be overwritten by an older profile snapshot.
+  const enrolled = enrolledList(list.id);
+  if (client === msal && account === read("account") && enrolled && enrolled.mode !== "off" && !read(unenrollKey(list.id))) {
+    const profile = listProfile(enrolled);
+    const updated = discoverProfileItems(profile, planned.filter(task => task.status !== "completed").map(task => task.base));
+    if (updated !== profile) groupingStore.save(updated);
+  }
   const groups = duplicateGroups(planned);
   const previous = readSnapshot(list.id);
   const checks = new Map<string, Check>();

@@ -1,6 +1,6 @@
 import { deepEqual, equal } from "node:assert/strict";
 import { test } from "node:test";
-import { groupingDraft, moveMatch, removeGroup } from "../src/client/lib/groupingDraft.js";
+import { compactMatchGroups, groupingDraft, moveMatch, removeGroup } from "../src/client/lib/groupingDraft.js";
 
 test("the editor shows effective defaults once and retains a moved default item", () => {
   const groups = groupingDraft([
@@ -39,4 +39,23 @@ test("enabled groups collapse pairs and moving to an exact group keeps both form
   deepEqual(moved[1].matches, ["apple", "apples"]);
   const removed = removeGroup(groups, groups[0].id);
   deepEqual(removed[0].matches, ["apple", "apples", "potato", "potatoes"]);
+});
+
+
+test("plural chips keep a separately owned singular through moves, toggles and group removal", () => {
+  const groups = groupingDraft([
+    { name: "Produce", matches: ["apple"] },
+    { name: "Frozen", matches: [] },
+    { name: "Other", matches: [], defaultMatches: ["apples"], matchPlurals: true },
+  ]);
+  deepEqual(groups[0].matches, ["apple"]);
+  deepEqual(groups[2].matches, ["apples"]);
+  const moved = moveMatch(groups, "apples", groups[1].id);
+  deepEqual(moved.map(group => group.matches), [["apple"], ["apples"], []]);
+  const returned = moveMatch(moved, "apples", groups[2].id);
+  deepEqual(returned.map(group => group.matches), [["apple"], [], ["apples"]]);
+  const toggled = compactMatchGroups(groups.map(group => ({ ...group, matchPlurals: !group.matchPlurals })));
+  deepEqual(toggled.map(group => group.matches), [["apple"], [], ["apples"]]);
+  const removed = removeGroup(moved, groups[1].id);
+  deepEqual(removed.map(group => group.matches), [["apple"], ["apples"]]);
 });
