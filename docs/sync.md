@@ -17,7 +17,7 @@ GraphRelay polls Microsoft Graph. To Do and Calendar have independent schedules.
 
 The default is 1 minute. Supported choices are 1, 2, 5, 10, 30 and 60 minutes. The scheduler works from the connected account’s cached directory plus enrolled list IDs. It skips lists already busy or pending unenrollment. On startup and Microsoft reconnect, polling can repopulate local snapshots.
 
-For enrolled lists with grouping enabled, snapshot refreshes also record unknown open item names as matches under Other in the current shared profile. Discovery uses recovered base titles and the profile’s normalization rules, preserves known matches, and only saves when new names are found. Profile revisions change on discovery, so stale editor saves remain protected.
+For enrolled lists with grouping enabled, snapshot refreshes also record unknown open item names as default aliases under Other in the current shared profile. Discovery uses recovered base titles and the profile’s normalization rules, preserves known matches, and only saves when new names are found. Profile revisions change on discovery, so stale editor saves remain protected.
 
 An enrolled run plans prefixes and capitalization for open tasks, checks a task’s current title and status before updating it, optionally runs automatic duplicate cleanup, then saves the latest items and duplicate preview. It records errors and backs off until the next scheduled attempt. Before a title write, GraphRelay records the proposed title so a later run can recover tracking if Microsoft accepted the change and the process stopped before recording success.
 

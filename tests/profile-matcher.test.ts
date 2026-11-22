@@ -1,5 +1,6 @@
 import { deepEqual, equal } from "node:assert/strict";
 import { test } from "node:test";
+import { groupingDraft } from "../src/client/lib/groupingDraft.js";
 import { assignProfileItem, discoverProfileItems, profileMatcher } from "../src/server/profile-matcher.js";
 
 test("moving all default names into editable matches preserves pack sizes and removals", () => {
@@ -70,7 +71,8 @@ test("discovery normalizes unknown items and preserves exact, default, prefix an
     ],
   };
   const updated = discoverProfileItems(profile, ["  Star   Fruits 500g ", "2 x star fruit", "apples", "pears", "frozen peas", "known", "other default", "misc item", " "]);
-  deepEqual(updated.groups[2].matches, ["known", "star fruit"]);
+  deepEqual(updated.groups[2].matches, ["known"]);
+  deepEqual(updated.groups[2].defaultMatches, ["other default", "star fruit"]);
   equal(updated.groups[0], profile.groups[0]);
   equal(updated.groups[1], profile.groups[1]);
   deepEqual(profile.groups[2].matches, ["known"]);
@@ -83,6 +85,33 @@ test("discovery normalizes unknown items and preserves exact, default, prefix an
 test("discovery retains meaningful quantities and distinct plurals when those options are disabled", () => {
   const profile = { id: "sample", name: "Sample", grocery: false, groups: [{ name: "Other", matches: [] }] };
   const updated = discoverProfileItems(profile, ["Widget", " widget ", "widgets", "widget 2kg"]);
-  deepEqual(updated.groups[0].matches, ["widget", "widgets", "widget 2kg"]);
+  deepEqual(updated.groups[0].defaultMatches, ["widget", "widgets", "widget 2kg"]);
   equal(discoverProfileItems(updated, ["WIDGET", "widgets", "widget 2kg"]), updated);
+});
+
+
+test("discovered plural aliases preserve known default assignments through editor saves", () => {
+  for (const [singular, plural] of [["star fruit", "star fruits"], ["mouse", "mice"]]) {
+    const profile = {
+      id: "sample", name: "Sample", grocery: false, ignoreQuantities: true,
+      groups: [
+        { name: "Produce", matches: [], defaultMatches: [plural], matchPlurals: false },
+        { name: "Other", matches: [], matchPlurals: true },
+      ],
+    };
+    equal(profileMatcher(profile)(plural), "Produce");
+    const updated = discoverProfileItems(profile, [singular, singular + " 500g"]);
+    equal(profileMatcher(updated)(plural), "Produce");
+    equal(profileMatcher(updated)("2 x " + plural + " 500g"), "Produce");
+    equal(profileMatcher(updated)(singular), "Other");
+    equal(updated.groups[0], profile.groups[0]);
+    equal(discoverProfileItems(updated, [singular, plural]), updated);
+    const draft = groupingDraft(updated.groups);
+    deepEqual(draft[0].matches, [plural]);
+    deepEqual(draft[1].matches, [singular]);
+    const saved = { ...updated, groups: draft.map(({ name, matches, prefixes, matchPlurals }) => ({ name, matches, prefixes, matchPlurals })) };
+    equal(profileMatcher(saved)(plural), "Produce");
+    equal(profileMatcher(saved)(singular), "Other");
+    equal(discoverProfileItems(saved, [singular, plural]), saved);
+  }
 });

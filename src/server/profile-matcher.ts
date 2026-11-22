@@ -38,8 +38,10 @@ export function discoverProfileItems(profile: Profile, names: string[]): Profile
   if (!discovered.size) return profile;
   return {
     ...profile,
+    // Discovery must stay below existing exact/default aliases in matching priority.
+    // The editor shows these aliases as chips and promotes them when explicitly saved.
     groups: profile.groups.map(group => group === other
-      ? { ...group, matches: [...group.matches, ...discovered] } : group),
+      ? { ...group, defaultMatches: [...(group.defaultMatches ?? []), ...discovered] } : group),
   };
 }
 

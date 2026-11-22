@@ -50,7 +50,7 @@ test("sync discovers editable shared entries, protects stale drafts and remember
   const profiles = () => get<ApiProfile[]>("grouping-profiles");
   for (const id of ["first", "second", "disabled", "unenrolled"]) await sync(id);
   const initial = (await profiles()).find(profile => profile.id === "sample")!;
-  assert.deepEqual(initial.groups[1].matches, ["star fruit"]);
+  assert.deepEqual(initial.groups[1].defaultMatches, ["star fruit"]);
   await Promise.all([sync("first"), sync("second")]);
   assert.equal((await profiles()).find(profile => profile.id === "sample")!.revision, initial.revision);
   const added = once(server, "message", { signal: AbortSignal.timeout(5_000) });
@@ -58,7 +58,7 @@ test("sync discovers editable shared entries, protects stale drafts and remember
   assert.deepEqual(await added, ["added", undefined]);
   await sync("first");
   let current = (await profiles()).find(profile => profile.id === "sample")!;
-  assert.deepEqual(current.groups[1].matches, ["star fruit", "dragon fruit"]);
+  assert.deepEqual(current.groups[1].defaultMatches, ["star fruit", "dragon fruit"]);
   const stale = await fetch(base + "/api/grouping-profiles/sample", { method: "PUT", headers, body: JSON.stringify(initial) });
   assert.equal(stale.status, 409);
   const draft = groupingDraft(current.groups);
