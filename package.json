@@ -23,7 +23,7 @@
     "express-rate-limit": "^8.7.5",
     "express-session": "^1.19.0",
     "ical-generator": "^11.1.4",
-    "lucide-react": "^1.77.0",
+    "lucide-react": "^1.78.0",
     "pluralize": "^8.0.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
